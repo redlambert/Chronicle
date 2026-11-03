@@ -682,10 +682,10 @@ struct DraftWaterLayout {
     s32            rows;              /**< Grid rows the surface is divided into. */
     s32            columns;           /**< Grid columns the surface is divided into. */
     float         *height;            /**< Wave heights the surface currently draws from. */
-    float          height_buffers[2]; /**< The two wave-height buffers. */
+    float         *height_buffers[2]; /**< The two wave-height buffers. */
     sceVu0FVECTOR  vertex[4];         /**< The four corners of the surface. */
     u_int         *packet;            /**< First VU packet of the surface. */
-    float          buffer_packets[2]; /**< VU packets for each display buffer. */
+    u_int         *buffer_packets[2]; /**< VU packets for each display buffer. */
     CVisualPolyVu1 visual;            /**< Draws the polygons of the surface. */
     float          color;             /**< Red, green, blue and alpha channels of the surface. */
     float          wave_speed;        /**< Speed the ripples travel across the grid at. */
