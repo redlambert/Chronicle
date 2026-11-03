@@ -663,6 +663,12 @@ bool WriteReplacing(const std::filesystem::path &path, std::string_view text) {
     }
     std::filesystem::rename(temp, path, error);
     if (error) {
+        error.clear();
+        std::filesystem::remove(path, error);
+        error.clear();
+        std::filesystem::rename(temp, path, error);
+    }
+    if (error) {
         std::filesystem::remove(temp, error);
         return false;
     }
