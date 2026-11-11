@@ -85,6 +85,15 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_DUSACK, "Faster combo, better\nchests. Hits mimics\nat any time."},
     {ITEM_WEAPON_CROSS_HINDER, "Sanctifier: 2x damage\nand ABS vs undead,\nwho stay down."},
     {ITEM_WEAPON_7THHEAVEN, "Holy sword. Guarding\nblocks all attacks;\ncuts through guards."},
+    {ITEM_WEAPON_FLAMINGO, "Locks on to enemies\nfrom twice as far."},
+    {ITEM_WEAPON_STEEL_SLINGSHOT, "Below a tenth of its\nWHP, each shot wears\nit half as much."},
+    {ITEM_WEAPON_INFERNO, "Hits harder the less\nlife and water Goro\nhas left."},
+    {ITEM_WEAPON_PARTISAN, "Quick Swing: a combo\na third faster."},
+    {ITEM_WEAPON_DE_SANGA, "Vampire: every kill\nheals it 5 WHP."},
+    {ITEM_WEAPON_JAVELIN, "Marine: sea enemies\nhave no defense and\ngive 2x ABS."},
+    {ITEM_WEAPON_SCORPION, "Its poison cures yours\nand soaks up half the\nenemy's ABS."},
+    {ITEM_WEAPON_SNAIL, "Slime Trail: hits may\nleave enemies stuck."},
+    {ITEM_WEAPON_SKUNK, "Its flamethrower\nreaches twice as far."},
 };
 
 /**
@@ -576,7 +585,142 @@ int ToanAttack(int attack) {
 
 float LockOnRate() {
     // Sanctifier's reach, which Big Bang and the Sword of Zeus carry on.
-    return LongLockOn(ToanWeapon()) ? 2.0f : 1.0f;
+    if (LongLockOn(ToanWeapon())) {
+        return 2.0f;
+    }
+
+    // Flamingo: Xiao locks on from twice as far, and so do the Dragon's Y's line.
+    if (Is(HeldBy(CHARA_XIAO), {ITEM_WEAPON_FLAMINGO, ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
+                                ITEM_WEAPON_ANGEL_SHOOTER, ITEM_WEAPON_ANGE_GEAR})) {
+        return 2.0f;
+    }
+
+    return 1.0f;
+}
+
+int HeldBy(int chara) {
+    if (UserStatus == nullptr || NowWeaponHave == nullptr || UserStatus->cur_chara != chara) {
+        return -1;
+    }
+
+    return NowWeaponHave->item_no;
+}
+
+void UngagaSwingStep() {
+    // Partisan: the three combo motions play a third faster, Swift Strikes' factor. The
+    // second swing hands over within half a frame of its end, so its step stays under 0.5.
+    struct Swing {
+        int   motion;
+        int   start;
+        int   end;
+        float stock;
+    };
+
+    constexpr std::array<Swing, 3> kSwings = {
+        {{0x25, 670, 678, 0.28f}, {0x26, 678, 694, 0.32f}, {0x27, 695, 714, 0.32f}}
+    };
+    constexpr float kFactor = 4.0f / 3.0f;
+
+    MOTION_INFO *motions = CharaMain.motion_type.motion_info;
+
+    if (motions == nullptr || UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+        return;
+    }
+
+    const bool fast = HeldBy(CHARA_UNGAGA) == ITEM_WEAPON_PARTISAN;
+
+    for (const Swing &swing : kSwings) {
+        MOTION_INFO &motion = motions[swing.motion];
+
+        if (motion.start != swing.start || motion.end != swing.end) {
+            continue;
+        }
+
+        const float quick = swing.stock * kFactor;
+
+        if (std::fabs(motion.speed - swing.stock) > 0.01f && std::fabs(motion.speed - quick) > 0.01f) {
+            continue;
+        }
+
+        motion.speed = fast ? quick : swing.stock;
+    }
+}
+
+int GoroAttack(int attack) {
+    // Inferno: the hammer hits harder the worse Goro is doing, by the share of life he is
+    // missing plus half the share of water, both of his attack capped at 350.
+    if (HeldBy(CHARA_GORO) != ITEM_WEAPON_INFERNO) {
+        return attack;
+    }
+
+    constexpr int kAttackCap = 350;
+
+    const int   chara = CHARA_GORO;
+    const float total = static_cast<float>(std::min(attack, kAttackCap));
+    const float max_hp = std::max<float>(1.0f, UserStatus->max_hp[chara]);
+    const float max_water = std::max(1.0f, UserStatus->water_max[chara]);
+    const float hp_missing = 1.0f - static_cast<float>(UserStatus->hp[chara]) / max_hp;
+    const float water_missing = 1.0f - UserStatus->water_now[chara] / max_water;
+    const float boost = total * (std::max(0.0f, hp_missing) + 0.5f * std::max(0.0f, water_missing));
+
+    return static_cast<int>(total + boost);
+}
+
+float EnemyDefense(float defense, const MONSTOR &monster, int owner) {
+    // Javelin: a sea enemy has no defense against it.
+    if (owner >= 0 && HeldBy(owner) == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
+        return 0.0f;
+    }
+
+    return defense;
+}
+
+void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
+    if (owner < 0) {
+        return;
+    }
+
+    const int held = HeldBy(owner);
+
+    // Snail: one hit in twenty leaves the enemy stuck in its slime.
+    constexpr int kSnailGooPercent = 5;
+    constexpr int kGooFrames = 180;
+
+    if (held == ITEM_WEAPON_SNAIL && std::rand() % 100 < kSnailGooPercent && monster.stop_timer == 0 &&
+        monster.poison_timer == 0 && monster.anger_timer == 0) {
+        monster.slow_timer = kGooFrames;
+    }
+
+    // Scorpion: when its poison takes hold, Ungaga's own poison is drawn out and the weapon
+    // soaks up half the enemy's ABS.
+    if (held == ITEM_WEAPON_SCORPION && poisoned && NowWeaponHave != nullptr) {
+        UserStatus->ailments[owner] &= ~AILMENT_POISON;
+
+        const int max_exp = GetWeaponMaxExp(NowWeaponHave);
+
+        if (NowWeaponHave->experience < max_exp) {
+            NowWeaponHave->experience = static_cast<s16>(std::min(max_exp, NowWeaponHave->experience + monster.exp / 2));
+        }
+    }
+}
+
+float WearAmount(float amount) {
+    // Steel Slingshot: once its WHP is down to a tenth, each shot wears it half as much.
+    constexpr float kLowShare = 0.1f;
+
+    const int held = HeldBy(CHARA_XIAO);
+
+    if (held == ITEM_WEAPON_STEEL_SLINGSHOT &&
+        NowWeaponHave->durability_f <= kLowShare * static_cast<float>(NowWeaponHave->durability)) {
+        return amount * 0.5f;
+    }
+
+    return amount;
+}
+
+float FlameSpacing() {
+    // Skunk: the flamethrower reaches twice as far.
+    return HeldBy(CHARA_OSMOND) == ITEM_WEAPON_SKUNK ? 4.0f : 2.0f;
 }
 
 float ExtraChargePerStep() {
@@ -726,6 +870,11 @@ int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon) {
         return exp;
     }
 
+    // Javelin: a sea enemy gives twice its ABS.
+    if (weapon->item_no == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
+        exp *= 2;
+    }
+
     // Jacket Hunter: a Master Jacket the Gladius kills gives four times its ABS.
     constexpr s16 kMasterJacketName = 1;
 
@@ -856,8 +1005,19 @@ int LevelUpCarry(WEAPON_HAVE *weapon) {
     return std::max(0, weapon->experience - GetWeaponMaxExp(weapon));
 }
 
-void OnKill(const MONSTOR & /*monster*/, const WEAPON_HAVE *weapon, float *position) {
-    if (weapon == nullptr || RandomItem == nullptr) {
+void OnKill(const MONSTOR & /*monster*/, WEAPON_HAVE *weapon, float *position) {
+    if (weapon == nullptr) {
+        return;
+    }
+
+    // DeSanga: every kill heals it 5 WHP.
+    constexpr float kDeSangaHeal = 5.0f;
+
+    if (weapon->item_no == ITEM_WEAPON_DE_SANGA) {
+        weapon->durability_f = std::min(static_cast<float>(weapon->durability), weapon->durability_f + kDeSangaHeal);
+    }
+
+    if (RandomItem == nullptr) {
         return;
     }
 

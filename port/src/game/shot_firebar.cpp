@@ -6,6 +6,7 @@
 
 #include "collisiondata.hpp"
 #include "dun/gameloop.hpp"
+#include "expanded_weapons.hpp"
 #include "itemdata.hpp"
 #include "mglib.hpp"
 #include "motionmodel.hpp"
@@ -28,7 +29,8 @@ int CSHOT_FIREBAR::Init(float *origin, float *direction, int collision_damage, i
 
     direction[3] = 1.0f;
     sceVu0Normalize(direction, direction);
-    sceVu0ScaleVectorXYZ(step, direction, 2.0f);
+    // Dark Cloud Expanded: the Skunk spaces its flames twice as far apart.
+    sceVu0ScaleVectorXYZ(step, direction, expanded::FlameSpacing());
 
     for (int particle = 0; particle < kStreamParticles; particle++) {
         const int slot = particle + start_index;
@@ -55,7 +57,8 @@ int CSHOT_FIREBAR::Set(float *origin, float *direction, int collision_damage, in
 
     direction[3] = 1.0f;
     sceVu0Normalize(direction, direction);
-    sceVu0ScaleVectorXYZ(step, direction, 2.0f);
+    // Dark Cloud Expanded: the Skunk spaces its flames twice as far apart.
+    sceVu0ScaleVectorXYZ(step, direction, expanded::FlameSpacing());
 
     // Each particle travels from where it is to its place along the new stream, the farther
     // ones over more steps.

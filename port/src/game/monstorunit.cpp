@@ -1510,6 +1510,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                         }
                     }
 
+                    // Dark Cloud Expanded: what the hitting weapon does as it lands (Snail, Scorpion).
+                    expanded::OnEnemyHit(monster[current_monster], owner, monster[current_monster].poison_timer == 180);
+
                     auto damage = static_cast<float>(record->damage);
 
                     if (owner == 1 || owner == 3 || owner == 5) {
@@ -1540,6 +1543,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                     if (owner == 3) {
                         defense /= 2.0f;
                     }
+
+                    // Dark Cloud Expanded: the Javelin ignores a sea enemy's defense.
+                    defense = expanded::EnemyDefense(defense, monster[index], owner);
 
                     damage -= defense;
 

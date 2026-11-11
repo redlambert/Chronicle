@@ -139,6 +139,45 @@ int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon);
 short *MenuDescription(const ClsMes *mes, const short *buff, int line);
 
 /**
+ * The weapon in the active character's hand on a dungeon floor while that character is chara,
+ * else -1.
+ */
+int HeldBy(int chara);
+
+/**
+ * Partisan: Ungaga's three combo swings play a third faster. Called each step of his swings.
+ */
+void UngagaSwingStep();
+
+/**
+ * Goro's swing damage with his held hammer's effect (Inferno) added.
+ */
+int GoroAttack(int attack);
+
+/**
+ * An enemy's defense against a hit from owner's weapon: 0 for a sea enemy against the
+ * Javelin.
+ */
+float EnemyDefense(float defense, const MONSTOR &monster, int owner);
+
+/**
+ * A hit from owner's weapon has landed on monster, after the weapon's own ailments were
+ * rolled; poisoned says whether this hit poisoned it. Snail's goo and Scorpion's venom.
+ */
+void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned);
+
+/**
+ * The WHP a wear of amount costs the active character's weapon: half for a nearly broken
+ * Steel Slingshot.
+ */
+float WearAmount(float amount);
+
+/**
+ * The gap between the flames of Osmond's flamethrower: 2, or 4 for the Skunk.
+ */
+float FlameSpacing();
+
+/**
  * Circle Amplifier: how many times over every magic circle works. 1, or 2 while a Crysknife
  * or a Magical Hammer is owned, or 3 while both are.
  */
@@ -174,7 +213,7 @@ int LevelUpCarry(WEAPON_HAVE *weapon);
 /**
  * A kill credited to the active character with weapon: the drops weapon effects add.
  */
-void OnKill(const MONSTOR &monster, const WEAPON_HAVE *weapon, float *position);
+void OnKill(const MONSTOR &monster, WEAPON_HAVE *weapon, float *position);
 
 /**
  * The item a chest hands over once Toan opens it: Fine Fare's upgrades.

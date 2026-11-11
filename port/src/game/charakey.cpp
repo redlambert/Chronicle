@@ -644,6 +644,8 @@ void UngagaKey_Play() {
     getFramePos(static_cast<CFrameVu1 *>(NowWeapon->frame), "dcol1", hit_right);
     sceVu0CopyVector(chara_pos, CharaMain.pos);
 
+    // Dark Cloud Expanded: Partisan's quicker combo.
+    expanded::UngagaSwingStep();
     int damage = NowWeaponHave->attack;
 
     if (StatusErrCheck(AILMENT_STAMINA) != 0) {
@@ -948,7 +950,8 @@ void GoroKey_On() {
 
 void GoroKey_Play() {
     float time = CharaMain.motion_type.state.time;
-    int   damage = NowWeaponHave->attack;
+    // Dark Cloud Expanded: Inferno.
+    int   damage = expanded::GoroAttack(NowWeaponHave->attack);
 
     if (StatusErrCheck(AILMENT_STAMINA) != 0) {
         damage *= 2;

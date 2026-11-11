@@ -2893,7 +2893,8 @@ void motionDrive() {
         s8           owner = status->cur_chara;
         WEAPON_HAVE *weapon = &status->chara_weapons[owner][status->equipped_weapon_slot[owner]];
 
-        if (weapon->durability_f <= 10.0f && weapon->item_no != defWeapon__6[owner]) {
+        // Dark Cloud Expanded: the Weapon Beep option.
+        if (ConfigGet().weapon_beep && weapon->durability_f <= 10.0f && weapon->item_no != defWeapon__6[owner]) {
             static int warning_cnt = 0;
             auto       wait = static_cast<int>(weapon->durability_f) * 10;
 
@@ -3402,7 +3403,8 @@ void SwordDmgCheck1(float amount, int kind) {
     float        was = weapon->durability_f;
     auto         warn = static_cast<float>(weapon->durability * 0.2);
 
-    int broke = BattleSubWeaponDmg(amount, kind);
+    // Dark Cloud Expanded: the Steel Slingshot wears slower when nearly broken.
+    int broke = BattleSubWeaponDmg(expanded::WearAmount(amount), kind);
 
     // The Chronicle sword says so once, as its durability crosses a fifth.
     if (weapon->item_no == ITEM_WEAPON_LAMB_S_SWORD && weapon->durability_f <= warn && was >= warn) {
@@ -5374,7 +5376,8 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
             se = 0xE1;
             break;
         case TRAP_CIRCLE_MONEY_UP: {
-            had_copy *= 1.0f + 0.2f * static_cast<float>(amp);
+            // Dark Cloud Enhanced: "Funds increased" gives 1.5x, not 2.2x; amplified, 2x or 2.5x.
+            had_copy *= 0.5f * static_cast<float>(amp);
             int added = had_copy + 10 * amp;
 
             if (had + added >= 0xFFFF) {
