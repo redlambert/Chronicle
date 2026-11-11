@@ -5168,7 +5168,7 @@ FISH_EXCHANGE_ITEM exitemlst[35] = {
     {ITEM_ATTACH_TOPAZ,          100 },
     {ITEM_ATTACH_TURQUOISE,      100 },
     {ITEM_WEAPON_TSUKIKAGE,      1100},
-    {ITEM_WEAPON_MATADOR,        1400},
+    {ITEM_WEAPON_FLAMINGO,       1000}, // Dark Cloud Expanded: retail offers the Matador for 1400 FP
     {ITEM_WEAPON_MAGICAL_HAMMER, 1800},
     {ITEM_WEAPON_FAIRY_S_RING,   1300},
     {ITEM_WEAPON_SCORPION,       1400},

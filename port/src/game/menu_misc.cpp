@@ -452,7 +452,8 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
 float GetNowWeaponRate(WEAPON_HAVE *weapon) {
     float rate = 1.0f;
 
-    if (weapon != nullptr && weapon->item_no == ITEM_WEAPON_LAMB_S_SWORD && weapon->durability_f <= 0.2f * weapon->durability) {
+    // Dark Cloud Expanded: the Lamb's Sword's stats rise at half durability instead of retail's 20%.
+    if (weapon != nullptr && weapon->item_no == ITEM_WEAPON_LAMB_S_SWORD && weapon->durability_f <= 0.5f * weapon->durability) {
         rate = 1.5f;
     }
 
@@ -509,7 +510,8 @@ void MenuWeaponSpSet(CCharacter *chara, WEAPON_HAVE *weapon) {
     int show_broken = 2;
     int show_whole = 1;
 
-    if (weapon->durability_f <= 0.2 * weapon->durability) {
+    // Dark Cloud Expanded: the Lamb's Sword turns into its wolf form at half durability instead of retail's 20%.
+    if (weapon->durability_f <= 0.5 * weapon->durability) {
         show_broken = 1;
         show_whole = 2;
     }

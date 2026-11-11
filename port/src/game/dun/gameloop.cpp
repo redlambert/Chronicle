@@ -3083,7 +3083,8 @@ void motionDrive() {
 
     heal_counter++;
 
-    if (!(heal_counter < 240)) {
+    // Dark Cloud Expanded: the Heal ability ticks every 3 seconds (180 frames) instead of retail's 4.
+    if (!(heal_counter < 180)) {
         if ((NowWeaponHave->flags & 0x800) && status->hp[status->cur_chara] > 0) {
             status->AddNowLife(status->cur_chara, 1, 255.0f);
         }

@@ -2746,6 +2746,13 @@ void WepDataListToHaveCopy(int weapon_no, WEAPON_HAVE *weapon) {
                 weapon->flags |= WEAPONFLAG_FRAGILE;
             }
         }
+
+        // Dark Cloud Expanded: a new Bone Slingshot or Hardshooter is Fragile half the time.
+        if (weapon->item_no == ITEM_WEAPON_BONE_SLINGSHOT || weapon->item_no == ITEM_WEAPON_HARDSHOOTER) {
+            if (rand() % 100 < 50) {
+                weapon->flags |= WEAPONFLAG_FRAGILE;
+            }
+        }
     }
 }
 
