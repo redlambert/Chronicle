@@ -119,6 +119,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_CACTUS, "Absorb: hits refill\nUngaga's water by a\ntenth of the damage."},
     {ITEM_WEAPON_HEAVEN_S_CLOUD, "Typhoon: hold the\nwhirlwind charge to\ngrow the blade to 3x."},
     {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
+    {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -451,6 +452,111 @@ void WhpStep() {
     g_whp_item = -1;
 }
 
+// Walking steps counted since the game started, for effects that act once a step.
+int g_step_count = 0;
+
+// ── The falloff blast ───────────────────────────────────────────────────────────────────────
+
+// One hit on each living enemy in reach, centred on its nearest hit sphere so it is that enemy's
+// alone: its weapon attack times the step its distance from the blast falls in (to the nearest
+// sphere's edge), and a kick away from the blast. Elementless. Big Bang's whirlwind and landing
+// plant it; so will the Sword of Zeus's bolt and Hercules' Wrath.
+struct BlastStep {
+    float radius;
+    float times;
+};
+
+constexpr BlastStep kBlastSteps[] = {{50.0f, 1.0f}, {40.0f, 2.0f}, {25.0f, 3.0f}, {10.0f, 4.0f}};
+constexpr float     kBlastKickSpeed = 3.5f;
+constexpr float     kBlastKickDecay = 0.12f;
+
+// Blast hits planted to pass guards, each good for this step and the next.
+struct BlastCrush {
+    int hit = -1;
+    int damage = 0;
+    int step = -1;
+};
+
+std::array<BlastCrush, 16> g_blast_crush;
+int                        g_blast_crush_next = 0;
+
+int PlantBlast(const float *at, float damage_scale, bool guard_break, int no_kick = -1) {
+    if (NowMonstorUnit == nullptr || NowWeaponHave == nullptr) {
+        return 0;
+    }
+
+    int planted = 0;
+
+    for (int m = 0; m < 16; m++) {
+        const MONSTOR &monster = NowMonstorUnit->monster[m];
+
+        if (monster.state != 2 || monster.hp <= 0 || monster.revealed == 0) {
+            continue;
+        }
+
+        // The nearest live hit sphere, on the ground plane.
+        const auto &spheres = NowMonstorUnit->effect[m];
+        int         nearest = -1;
+        float       edge = 0.0f;
+
+        for (int sphere = 0; sphere < 16; sphere++) {
+            if (spheres.timer[sphere] == 0) {
+                continue;
+            }
+
+            const float dx = spheres.position[sphere][0] - at[0];
+            const float dz = spheres.position[sphere][2] - at[2];
+            const float distance = std::max(0.0f, std::sqrt(dx * dx + dz * dz) - spheres.radius[sphere]);
+
+            if (nearest < 0 || distance < edge) {
+                nearest = sphere;
+                edge = distance;
+            }
+        }
+
+        if (nearest < 0) {
+            continue;
+        }
+
+        float times = 0.0f;
+
+        for (const BlastStep &step : kBlastSteps) {
+            if (edge <= step.radius) {
+                times = step.times;
+            }
+        }
+
+        if (times <= 0.0f) {
+            continue;
+        }
+
+        const int damage =
+            std::max(1, static_cast<int>(std::lround(static_cast<float>(NowWeaponHave->attack) * times * damage_scale)));
+        float centre[4] = {spheres.position[nearest][0], spheres.position[nearest][1], spheres.position[nearest][2], 1.0f};
+
+        NowColData->Set(centre, damage, 1, spheres.radius[nearest] + 1.0f, 0.0f, 2, 2, 0, 0);
+
+        auto &hit = NowColData->hit[NowColData->now_hit];
+        hit.vs_monster = NowWeaponHave->vs_monster;
+        hit.weapon_flags = NowWeaponHave->flags;
+        hit.flags = 0;
+        hit.owner = UserStatus->cur_chara;
+        hit.attack_no = 0;
+
+        float origin[4] = {at[0], at[1], at[2], 1.0f};
+        NowColData->SetKickBack(origin, m == no_kick ? 0.0f : kBlastKickSpeed, kBlastKickDecay, 2);
+
+        if (guard_break) {
+            g_blast_crush[g_blast_crush_next] = {NowColData->now_hit, damage, g_step_count};
+            g_blast_crush_next = (g_blast_crush_next + 1) % static_cast<int>(g_blast_crush.size());
+        }
+
+        planted++;
+    }
+
+    return planted;
+}
+
 // ── Sun Sword "Solar Flash" ─────────────────────────────────────────────────────────────────
 
 // Guard held a second and a half primes the blade; the next swing that lands lets it go. Every
@@ -475,8 +581,12 @@ int   g_solar_steps = 0;
 int   g_solar_blind = 0;
 
 bool SolarFlashes(int item_no) {
-    return item_no == ITEM_WEAPON_SUN_SWORD;
+    return item_no == ITEM_WEAPON_SUN_SWORD || item_no == ITEM_WEAPON_BIG_BANG;
 }
+
+// Big Bang "Detonate": its whirlwind is the blast at Toan's feet, and a primed swing while
+// locked on brings the blast down on the target with the flash. Either costs 20 WHP.
+constexpr float kDetonateWhp = 20.0f;
 
 void SolarStep(int held) {
     if (g_solar_blind > 0) {
@@ -568,6 +678,17 @@ void SolarFlash() {
 
     // A white pulse on Toan as the room is blinded.
     setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+
+    // Detonate: locked on, the blast lands on the target, through any guard.
+    if (NowWeaponHave->item_no == ITEM_WEAPON_BIG_BANG && lockOnTargetFlag != 0 && lockOnTargetNo >= 0 && lockOnTargetNo < 16 &&
+        NowMonstorUnit->monster[lockOnTargetNo].state == 2 && NowMonstorUnit->monster[lockOnTargetNo].hp > 0) {
+        sceVu0FVECTOR target;
+        NowMonstorUnit->chara[lockOnTargetNo][0].GetPosition(target);
+        PlantBlast(target, 1.0f, true);
+        DrainWhp(ITEM_WEAPON_BIG_BANG, kDetonateWhp);
+        return;
+    }
+
     DrainWhp(NowWeaponHave->item_no, kSolarWhp);
 }
 
@@ -775,7 +896,6 @@ bool  g_tuna_healing = false;
 float g_tuna_last_whp = -1.0f;
 int   g_tuna_last_hp = -1;
 int   g_tuna_rolled_step = -1;
-int   g_step_count = 0;
 
 void TunaReset() {
     g_tuna_bank = 0.0f;
@@ -1844,6 +1964,13 @@ bool PassesGuard(int hit_owner, int hit) {
         return true;
     }
 
+    // A guard-breaking blast's hit, planted this step or the last.
+    for (const BlastCrush &crush : g_blast_crush) {
+        if (crush.hit == hit && crush.step >= g_step_count - 1 && NowColData->hit[hit].damage == crush.damage) {
+            return true;
+        }
+    }
+
     // Charging Bull: a charged Matador pellet's hit, planted this step or the last.
     for (const CrushHit &crush : g_crush_hits) {
         if (crush.hit == hit && crush.step >= g_step_count - 1 && NowColData->hit[hit].damage == crush.damage) {
@@ -2431,6 +2558,16 @@ void OnToanWhirl(CSHOT_EFFECT *effect, int slot) {
     SetSlotScale(effect, slot, scale);
     RadiusOwner(effect, CHARA_TOAN);
     g_mobius_radius[slot] = scale;
+
+    // Detonate: the spin is the blast at his feet, through any guard; its own hit is put out of
+    // reach so nothing is struck twice.
+    constexpr float kOutOfReach = -1000.0f;
+
+    if (ToanWeapon() == ITEM_WEAPON_BIG_BANG) {
+        g_mobius_radius[slot] = kOutOfReach;
+        PlantBlast(CharaMain.pos, 1.0f, true);
+        DrainWhp(ITEM_WEAPON_BIG_BANG, kDetonateWhp);
+    }
 }
 
 void DrainWhp(int item_no, float base_whp) {
@@ -2566,6 +2703,7 @@ void OnFloorStart() {
     g_typhoon_steps = -1;
     g_solar = Solar::Idle;
     g_solar_blind = 0;
+    g_blast_crush = {};
     g_whp_bill = 0.0f;
     g_whp_item = -1;
 }
