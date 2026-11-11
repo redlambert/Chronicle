@@ -83,6 +83,13 @@ bool UngagaChargeHit(const COLLISION_HIT &hit) {
 }
 
 /**
+ * Dark Cloud Expanded: the Master Jacket's name number (MonstorTable entry 0), which the
+ * Gladius's "Jacket Hunter" looks for, and the ABS multiple it gives on the kill.
+ */
+constexpr s16 kMasterJacketName = 1;
+constexpr int kJacketHunterAbs = 4;
+
+/**
  * How tall the current character stands.
  */
 float CharaHeight(CUserStatus *status) {
@@ -2232,6 +2239,12 @@ void CMonstorUnit::Step(int pause) {
                         if (monster[current_monster].last_attacker == current_chara && no_exp == 0) {
                             int max_exp = GetWeaponMaxExp(weapon);
                             int exp = monster[current_monster].exp;
+
+                            // Dark Cloud Expanded: the Gladius's "Jacket Hunter". A Master Jacket it
+                            // kills gives four times its ABS, before the back-floor and ABS Up boosts.
+                            if (weapon->item_no == ITEM_WEAPON_GLADIUS && monster[current_monster].name_no == kMasterJacketName) {
+                                exp *= kJacketHunterAbs;
+                            }
 
                             if (back_dungeon != 0) {
                                 exp *= 2;

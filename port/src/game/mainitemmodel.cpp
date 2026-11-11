@@ -267,7 +267,15 @@ void CMainItemModel::Step() {
                 SndSePlay(SE_EXPLOSION, -1, 0);
                 CSHOT_EFFECT &effect = MasekiEffect[gem_no];
                 effect.Set(position, up, -1, -1, 0, nullptr, -1);
-                effect.SetDmg(static_cast<int>(30.0f * static_cast<float>(selectMapNo + 1)));
+                int gem_damage = static_cast<int>(30.0f * static_cast<float>(selectMapNo + 1));
+
+                // Dark Cloud Expanded: the Crysknife's "Crystal Affinity". A gem thrown while
+                // Toan holds it bursts for twice the damage.
+                if (NowWeaponHave != nullptr && NowWeaponHave->item_no == ITEM_WEAPON_CRYSKNIFE) {
+                    gem_damage *= 2;
+                }
+
+                effect.SetDmg(gem_damage);
                 effect.SetLifeTime(10);
                 effect.SetWait(5);
                 DeleteModel(slot);

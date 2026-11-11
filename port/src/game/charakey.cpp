@@ -46,6 +46,27 @@ void basic_damage(int kind, int owner) {
     hit.attack_no = kind;
 }
 
+/**
+ * Dark Cloud Expanded: the Baselard's "Heavy Hand". Every hit it lands, the lunge and the
+ * whirlwind included, throws the enemy about 17 units: a third of the distance Big Bang's blast
+ * does, at the blast's own fade (distance is speed squared over twice the decay).
+ */
+constexpr float kHeavyHandSpeed = 2.02f;
+constexpr float kHeavyHandDecay = 0.12f;
+
+/**
+ * Sets the knockback of the hit just set on NowColData: retail's figures, or the held sword's
+ * own throw when it has one.
+ */
+void ToanKickBack(float *origin, float speed, float decay) {
+    if (NowWeaponHave->item_no == ITEM_WEAPON_BASELARD) {
+        speed = kHeavyHandSpeed;
+        decay = kHeavyHandDecay;
+    }
+
+    NowColData->SetKickBack(origin, speed, decay, 2);
+}
+
 } // namespace
 
 void ToanKey_On() {
@@ -109,46 +130,46 @@ void ToanKey_Play() {
     if (time >= 825 && time <= 828.0f) {
         NowColData->Set(hit_pos, damage, 1, 2.8f, 0.0f, 2, 2, 0, 0);
         basic_damage(0, 0);
-        NowColData->SetKickBack(chara_pos, 1.2f, 0.2f, 2);
+        ToanKickBack(chara_pos, 1.2f, 0.2f);
     }
 
     if (time >= 833 && time <= 835) {
         NowColData->Set(hit_pos, damage, 1, 5.3f, 0.0f, 2, 2, 0, 0);
         basic_damage(0, 0);
-        NowColData->SetKickBack(chara_pos, 1.2f, 0.2f, 2);
+        ToanKickBack(chara_pos, 1.2f, 0.2f);
     }
 
     if (time >= 842 && time <= 844.0f) {
         NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
         basic_damage(0, 0);
-        NowColData->SetKickBack(chara_pos, 1.5f, 0.3f, 2);
+        ToanKickBack(chara_pos, 1.5f, 0.3f);
     }
 
     if (time >= 851 && time <= 854) {
         NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
         basic_damage(0, 0);
-        NowColData->SetKickBack(chara_pos, 2.0f, 0.4f, 2);
+        ToanKickBack(chara_pos, 2.0f, 0.4f);
     }
 
     if (time >= 862 && time <= 866) {
         damage = static_cast<int>(static_cast<float>(damage) * 1.8f);
         NowColData->Set(hit_pos, damage, 1, 6.2f, 0.0f, 2, 2, 0, 0);
         basic_damage(0, 0);
-        NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+        ToanKickBack(chara_pos, 3.0f, 0.3f);
     }
 
     if (time >= 193.0f && time <= 196.0f) {
         damage = static_cast<int>(damage * 1.5);
         NowColData->Set(hit_pos, damage, 1, 6.0f, 0.0f, 2, 2, 0, 0);
         basic_damage(2, 0);
-        NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+        ToanKickBack(chara_pos, 3.0f, 0.3f);
     }
 
     if (time >= 720.0f && time <= 722) {
         damage = static_cast<int>(damage * 1.5);
         NowColData->Set(hit_pos, damage, 1, 12.0f, 0.0f, 2, 2, 0, 0);
         basic_damage(3, 0);
-        NowColData->SetKickBack(chara_pos, 3.0f, 0.3f, 2);
+        ToanKickBack(chara_pos, 3.0f, 0.3f);
     }
 
     constexpr std::array swing_motions{0x25, 0x26, 0x27, 0x28};
