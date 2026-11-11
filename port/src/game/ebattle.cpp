@@ -17,6 +17,8 @@
 #include "dataread.hpp"
 #include "dataset.hpp"
 #include "ebattle.hpp"
+
+#include "expanded_weapons.hpp"
 #include "edit.hpp"
 #include "editground.hpp"
 #include "editloop.hpp"
@@ -2237,7 +2239,8 @@ void EdMoveChara() {
                     st_cnt = 0;
                     SndSePlay(SE_FISHING_SINK, float_pos, -1.0f, -1.0f);
 
-                    if (rand() % 100 < 20) {
+                    // Dark Cloud Expanded: Blessed Bait keeps the bait.
+                    if (rand() % 100 < 20 && !expanded::KeepsBait()) {
                         EdFishingLostEsaMes();
                         FishingDeleteEsa();
                     }
@@ -2264,7 +2267,8 @@ void EdMoveChara() {
                     chara_fishing = ED_FISHING_WAIT_BITE;
                     wait_cnt = 0;
 
-                    if (rand() % 100 < 30) {
+                    // Dark Cloud Expanded: Blessed Bait keeps the bait.
+                    if (rand() % 100 < 30 && !expanded::KeepsBait()) {
                         EdFishingLostEsaMes();
                         FishingDeleteEsa();
                     }

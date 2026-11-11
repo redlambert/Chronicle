@@ -12,6 +12,7 @@
 namespace dc::game {
 
 class CCollisionData;
+class CMonstorUnit;
 class CSHOT;
 class CSHOT_EFFECT;
 class ClsMes;
@@ -313,6 +314,38 @@ void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged);
  * How much larger than its description a shot effect slot hits (Mobius Ring's grown orbs).
  */
 float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot);
+
+/**
+ * How many of an item are in carried weapon slots and in storage.
+ */
+int OwnedCount(int item_no);
+
+/**
+ * A magic circle about to work: the circle it works as (Favoured Circles turns bad ones good).
+ */
+int FavourCircle(int kind);
+
+/**
+ * The stat circle with Favoured Circles: its loss lands as a gain. False when the armlet is not
+ * owned, so the circle works as it would.
+ */
+bool FavouredStatCircle(WEAPON_HAVE *weapon, int amp);
+
+/**
+ * The rage circle with Favoured Circles: every enemy is slowed instead. False when the armlet
+ * is not owned.
+ */
+bool FavouredRageCircle(CMonstorUnit *unit, int amp);
+
+/**
+ * How far fish notice a bait: Bait Flamboyance and Venom Lure added to radius.
+ */
+float BaitRadius(int item_no, float radius);
+
+/**
+ * Whether bait is kept when the float sinks or a fish gets away (Blessed Bait).
+ */
+bool KeepsBait();
 
 /**
  * The floor's monster models are about to load: drops every borrowed shot copied from the last

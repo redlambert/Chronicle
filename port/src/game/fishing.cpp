@@ -1,5 +1,7 @@
 #include "fishing.hpp"
 
+#include "expanded_weapons.hpp"
+
 #include <libgraph.h>
 #include <libvu0.h>
 
@@ -585,7 +587,8 @@ void FishingStepFish() {
             float radius = 0.0f;
             Fish[i].SetFoodPos(-1, hook, radius);
         } else {
-            float radius = esa_info[esa_type].radius;
+            // Dark Cloud Expanded: Bait Flamboyance and Venom Lure widen the bait's notice.
+            float radius = expanded::BaitRadius(esa_info[esa_type].item_no, esa_info[esa_type].radius);
 
             // Debug builds let every fish notice the bait from anywhere.
             if (DebugMode) {

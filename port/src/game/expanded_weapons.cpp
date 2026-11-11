@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "btactstatus.hpp"
@@ -17,6 +18,7 @@
 #include "collisiondata.hpp"
 #include "dngmessageman.hpp"
 #include "dngstatusdata.hpp"
+#include "dungeonmap.hpp"
 #include "dun/gameloop.hpp"
 #include "frame.hpp"
 #include "framevu1.hpp"
@@ -90,13 +92,13 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_DUSACK, "Faster combo, better\nchests. Hits mimics\nat any time."},
     {ITEM_WEAPON_CROSS_HINDER, "Sanctifier: 2x damage\nand ABS vs undead,\nwho stay down."},
     {ITEM_WEAPON_7THHEAVEN, "Holy sword. Guarding\nblocks all attacks;\ncuts through guards."},
-    {ITEM_WEAPON_FLAMINGO, "Locks on to enemies\nfrom twice as far."},
+    {ITEM_WEAPON_FLAMINGO, "Locks on from twice as\nfar. Owned: fish notice\nbait from farther."},
     {ITEM_WEAPON_STEEL_SLINGSHOT, "Below a tenth of its\nWHP, each shot wears\nit half as much."},
     {ITEM_WEAPON_INFERNO, "Hits harder the less\nlife and water Goro\nhas left."},
     {ITEM_WEAPON_PARTISAN, "Quick Swing: a combo\na third faster."},
     {ITEM_WEAPON_DE_SANGA, "Vampire: every kill\nheals it 5 WHP."},
     {ITEM_WEAPON_JAVELIN, "Marine: sea enemies\nhave no defense and\ngive 2x ABS."},
-    {ITEM_WEAPON_SCORPION, "Its poison cures yours\nand soaks up half the\nenemy's ABS."},
+    {ITEM_WEAPON_SCORPION, "Poison cures yours and\nsoaks ABS. Owned: fish\nlove Poisonous Apples."},
     {ITEM_WEAPON_SNAIL, "Slime Trail: hits may\nleave enemies stuck."},
     {ITEM_WEAPON_SKUNK, "Its flamethrower\nreaches twice as far."},
     {ITEM_WEAPON_DRAGON_S_Y, "Hold for a 1.5x blast.\nLock-on reaches twice\nas far, moves faster."},
@@ -110,6 +112,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_BANDIT_S_RING, "Steal Shot: a steal\nmakes quick shots the\nenemy's, at 2x damage."},
     {ITEM_WEAPON_MOBIUS_RING, "Hold a full charge:\ndamage grows 1.5x and\nthe orbs grow with it."},
     {ITEM_WEAPON_SUPERNOVA, "Hits may stop, poison,\nanger or slime the\nenemy at random."},
+    {ITEM_WEAPON_SECRET_ARMLET, "Owned: bad magic\ncircles turn out as\ngood ones."},
+    {ITEM_WEAPON_BLESSING_GUN, "Owned: bait is never\nlost while fishing."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -1046,17 +1050,19 @@ int ToanWeapon() {
     return NowWeaponHave->item_no;
 }
 
-bool Owned(int item_no) {
+int OwnedCount(int item_no) {
     CDngStatusData *status = SaveData != nullptr ? SaveData->GetDngStatus() : nullptr;
 
     if (status == nullptr) {
-        return false;
+        return 0;
     }
+
+    int count = 0;
 
     for (const auto &weapons : status->chara_weapons) {
         for (int slot = 0; slot < 10; slot++) {
             if (weapons[slot].item_no == item_no) {
-                return true;
+                count++;
             }
         }
     }
@@ -1064,12 +1070,16 @@ bool Owned(int item_no) {
     if (CStockItem *stock = SaveData->GetStockItem(); stock != nullptr) {
         for (const WEAPON_HAVE &weapon : stock->weapons) {
             if (weapon.item_no == item_no) {
-                return true;
+                count++;
             }
         }
     }
 
-    return false;
+    return count;
+}
+
+bool Owned(int item_no) {
+    return OwnedCount(item_no) > 0;
 }
 
 bool SwiftStrikes(int item_no) {
@@ -2130,6 +2140,87 @@ void OnMonstersLoading() {
     g_stolen.Drop();
     g_breath.Drop();
     g_pellets = {};
+}
+
+int FavourCircle(int kind) {
+    // Favoured Circles: while a Secret Armlet is owned, every bad circle turns out as its good
+    // counterpart; the rage circle slows the enemies instead.
+    if (!Owned(ITEM_WEAPON_SECRET_ARMLET)) {
+        return kind;
+    }
+
+    switch (kind) {
+        case TRAP_CIRCLE_MONEY_DOWN:
+            return TRAP_CIRCLE_MONEY_UP;
+        case TRAP_CIRCLE_WHP_DOWN:
+            return TRAP_CIRCLE_WHP_UP;
+        case TRAP_CIRCLE_WHP_QUARTER:
+            return TRAP_CIRCLE_WHP_CURE;
+        default:
+            return kind;
+    }
+}
+
+bool FavouredStatCircle(WEAPON_HAVE *weapon, int amp) {
+    if (weapon == nullptr || !Owned(ITEM_WEAPON_SECRET_ARMLET)) {
+        return false;
+    }
+
+    // The stat circle's own roll, landing as a gain: one stat, then one element and one entry
+    // of each monster bonus group.
+    static constexpr int kStatCap = 999;
+    static constexpr int kBonusCap = 99;
+
+    const int gain = std::rand() % (2 * amp + 1) + 2 * amp;
+    s16      *stats[] = {&weapon->attack, &weapon->endurance, &weapon->speed, &weapon->magic};
+    s16      &stat = *stats[std::rand() % 4];
+
+    stat = static_cast<s16>(std::min(kStatCap, stat + gain));
+
+    auto raise = [amp](auto *values, int count, int base, int range) {
+        auto &value = values[std::rand() % count];
+        value = static_cast<std::remove_reference_t<decltype(value)>>(std::min(kBonusCap, value + (base + std::rand() % range) * amp));
+    };
+
+    raise(weapon->elem, 5, 2, 3);
+    raise(weapon->vs_monster, 3, 2, 2);
+    raise(&weapon->vs_monster[3], 3, 2, 2);
+    raise(&weapon->vs_monster[6], 4, 2, 2);
+    return true;
+}
+
+bool FavouredRageCircle(CMonstorUnit *unit, int amp) {
+    if (unit == nullptr || !Owned(ITEM_WEAPON_SECRET_ARMLET)) {
+        return false;
+    }
+
+    for (MONSTOR &entry : unit->monster) {
+        entry.slow_timer = 300 * amp;
+    }
+
+    return true;
+}
+
+float BaitRadius(int item_no, float radius) {
+    // Bait Flamboyance: each Flamingo owned, up to three, lets fish notice any bait 10 units
+    // farther.
+    constexpr float kFlamingoBonus = 10.0f;
+    constexpr int   kFlamingoMost = 3;
+
+    radius += kFlamingoBonus * static_cast<float>(std::min(OwnedCount(ITEM_WEAPON_FLAMINGO), kFlamingoMost));
+
+    // Venom Lure: with a Scorpion owned, the Poisonous Apple is noticed from twice as far.
+    if (item_no == ITEM_POISONOUS_APPLE && Owned(ITEM_WEAPON_SCORPION)) {
+        radius *= 2.0f;
+    }
+
+    return radius;
+}
+
+bool KeepsBait() {
+    // Blessed Bait: with a Blessing Gun owned, bait is never lost to a sinking float or a fish
+    // that gets away.
+    return Owned(ITEM_WEAPON_BLESSING_GUN);
 }
 
 void OnFloorStart() {

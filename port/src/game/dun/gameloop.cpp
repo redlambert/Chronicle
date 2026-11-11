@@ -5414,6 +5414,9 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
         kind = TRAP_CIRCLE_STAMINA;
     }
 
+    // Dark Cloud Expanded: Favoured Circles turns the bad circles good.
+    kind = expanded::FavourCircle(kind);
+
     switch (kind) {
         case TRAP_CIRCLE_STAMINA:
             BtSetStatusErr(AILMENT_STAMINA);
@@ -5453,6 +5456,12 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
             se = 0xE1;
             break;
         case TRAP_CIRCLE_ALL_MONSTER_STAMINA:
+            // Dark Cloud Expanded: Favoured Circles slows the enemies instead of enraging them.
+            if (expanded::FavouredRageCircle(NowMonstorUnit, amp)) {
+                se = 0xE1;
+                break;
+            }
+
             NowMonstorUnit->AllBin2();
             se = 0xE2;
             break;
@@ -5466,6 +5475,13 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
             break;
         }
         case TRAP_CIRCLE_STAT_DOWN:
+            // Dark Cloud Expanded: Favoured Circles raises the stats the circle would lower.
+            if (IsDefaultWeapon(weapon->item_no) < 0 && expanded::FavouredStatCircle(weapon, amp)) {
+                SetWeaponAttachStatus(NowWeaponHave);
+                se = 0xE1;
+                break;
+            }
+
             element = RGATE_STAT_DOWN;
             se = 0xE2;
             break;
