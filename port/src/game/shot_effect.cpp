@@ -9,6 +9,7 @@
 #include "collisiondata.hpp"
 #include "dataread.hpp"
 #include "dun/gameloop.hpp"
+#include "expanded_weapons.hpp"
 #include "framevu1.hpp"
 #include "hit_machingun_effect.hpp"
 #include "itembombeffect.hpp"
@@ -155,7 +156,8 @@ void CSHOT_EFFECT::Step() {
         SHOT_COLLISION_RESULT result = SHOT_COLLISION_NONE;
 
         if (phase[slot] < 2) {
-            result = checkCollision(hit_position, position, velocity[slot], effect_data->target, effect_data->radius[phase[slot]]);
+            // Dark Cloud Expanded: Mobius Ring's grown orbs hit as wide as they are drawn.
+            result = checkCollision(hit_position, position, velocity[slot], effect_data->target, effect_data->radius[phase[slot]] * expanded::ShotRadiusScale(this, slot));
         }
 
         if (life_time[slot] > 0) {
@@ -165,7 +167,7 @@ void CSHOT_EFFECT::Step() {
         if (!(effect_data->radius[phase[slot]] <= 0.0f) && life_time[slot] != 0) {
             // After each hit the effect waits its delay before it can hit again.
             if (wait_state[slot] <= 0) {
-                int hit = NowColData->Set(hit_position, damage[slot], 2, effect_data->radius[phase[slot]], 1.0f, effect_data->target, effect_data->hit_kind, effect_data->hit_flags, 0);
+                int hit = NowColData->Set(hit_position, damage[slot], 2, effect_data->radius[phase[slot]] * expanded::ShotRadiusScale(this, slot), 1.0f, effect_data->target, effect_data->hit_kind, effect_data->hit_flags, 0);
 
                 if (hit != -1) {
                     NowColData->SetUserID(user_id[slot], user_sub_id[slot]);

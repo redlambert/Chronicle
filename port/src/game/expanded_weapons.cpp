@@ -104,6 +104,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_TALL_HAMMER, "Each hit shrinks the\nenemy, down to 30%\nof its size."},
     {ITEM_WEAPON_BANDIT_SLINGSHOT, "Steal Shot: a steal\ntakes the enemy's\nshot, at 2x damage."},
     {ITEM_WEAPON_BANDIT_S_RING, "Steal Shot: a steal\nmakes quick shots the\nenemy's, at 2x damage."},
+    {ITEM_WEAPON_MOBIUS_RING, "Hold a full charge:\ndamage grows 1.5x and\nthe orbs grow with it."},
+    {ITEM_WEAPON_SUPERNOVA, "Hits may stop, poison,\nanger or slime the\nenemy at random."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -748,6 +750,36 @@ bool StolenBuild(CSHOT_EFFECT &source) {
     return true;
 }
 
+// ── Ruby: Mobius Ring ───────────────────────────────────────────────────────────────────────
+
+// Once the charge is full, each second and a half it is held multiplies the shot's damage by
+// 1.5, from attack plus magic, to at most 65,535. The held ball and the orbs it throws grow with
+// the multiplier, up to five times their size, and hit as wide as they are drawn.
+constexpr float kMobiusFull = 60.0f;
+constexpr int   kMobiusPeriod = 90;
+constexpr float kMobiusStep = 1.5f;
+constexpr float kMobiusMaxScale = 5.0f;
+constexpr int   kMobiusMaxDamage = 65535;
+
+float               g_mobius_mult = 1.0f;
+int                 g_mobius_steps = 0;
+const CSHOT_EFFECT *g_mobius_effect = nullptr;
+float               g_mobius_radius[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+
+int MobiusDamage() {
+    const float base = static_cast<float>(NowWeaponHave->attack + NowWeaponHave->magic);
+    return static_cast<int>(std::min(base * g_mobius_mult, static_cast<float>(kMobiusMaxDamage)));
+}
+
+float MobiusScale() {
+    return std::clamp(g_mobius_mult, 1.0f, kMobiusMaxScale);
+}
+
+void SetSlotScale(CSHOT_EFFECT *effect, int slot, float scale) {
+    float size[4] = {scale, scale, scale, 1.0f};
+    effect->chara[slot].SetScale(size);
+}
+
 /**
  * Whether a monster is one of the ice kind the Frozen Tuna's frost leaves alone: Blizzard,
  * Sam and the Ice Gemron.
@@ -1016,6 +1048,29 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
     if (held == ITEM_WEAPON_SNAIL && std::rand() % 100 < kSnailGooPercent && monster.stop_timer == 0 &&
         monster.poison_timer == 0 && monster.anger_timer == 0) {
         monster.slow_timer = kGooFrames;
+    }
+
+    // Supernova: one hit in nine puts one of four ailments on the enemy at random: stop, poison,
+    // anger or goo.
+    constexpr int kSupernovaPercent = 11;
+    constexpr int kSupernovaFrames = 300;
+    constexpr int kSupernovaGooFrames = 180;
+
+    if (held == ITEM_WEAPON_SUPERNOVA && std::rand() % 100 < kSupernovaPercent) {
+        switch (std::rand() % 4) {
+            case 0:
+                monster.stop_timer = kSupernovaFrames;
+                break;
+            case 1:
+                monster.poison_timer = 1;
+                break;
+            case 2:
+                monster.anger_timer = kSupernovaFrames;
+                break;
+            default:
+                monster.slow_timer = kSupernovaGooFrames;
+                break;
+        }
     }
 
     // Tall Hammer: each hit shrinks the enemy by a tenth of its size, down to 30%.
@@ -1568,6 +1623,61 @@ void StolenShotDraw() {
     }
 }
 
+void RubyChargeStep(float charge_time, int ball_slot) {
+    const bool mobius = HeldBy(CHARA_RUBY) == ITEM_WEAPON_MOBIUS_RING;
+
+    // A new charge starts from the stock damage.
+    if (charge_time <= 1.0f) {
+        g_mobius_mult = 1.0f;
+        g_mobius_steps = 0;
+    }
+
+    if (mobius && charge_time >= kMobiusFull) {
+        if (g_mobius_steps % kMobiusPeriod == 0 && MobiusDamage() < kMobiusMaxDamage) {
+            g_mobius_mult *= kMobiusStep;
+
+            const int damage = MobiusDamage();
+            ShowDungeonMessage(damage > 9000 ? std::string("Total damage is over 9000") : "Total damage " + std::to_string(damage),
+                               2 * kStepsPerSecond);
+        }
+
+        g_mobius_steps++;
+    }
+
+    if (NowMainEffect != nullptr && ball_slot >= 0 && ball_slot < 8) {
+        SetSlotScale(NowMainEffect, ball_slot, mobius ? MobiusScale() : 1.0f);
+    }
+}
+
+int RubyShotDamage(int damage) {
+    if (HeldBy(CHARA_RUBY) != ITEM_WEAPON_MOBIUS_RING || g_mobius_mult <= 1.0f) {
+        return damage;
+    }
+
+    return MobiusDamage();
+}
+
+void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged) {
+    if (effect == nullptr || slot < 0 || slot >= 8) {
+        return;
+    }
+
+    const float scale = charged && HeldBy(CHARA_RUBY) == ITEM_WEAPON_MOBIUS_RING ? MobiusScale() : 1.0f;
+
+    SetSlotScale(effect, slot, scale);
+    g_mobius_effect = effect;
+    g_mobius_radius[slot] = scale;
+}
+
+float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot) {
+    // Only while Ruby is out: another character's effect reloads into the same instance.
+    if (effect != g_mobius_effect || slot < 0 || slot >= 8 || UserStatus == nullptr || UserStatus->cur_chara != CHARA_RUBY) {
+        return 1.0f;
+    }
+
+    return g_mobius_radius[slot];
+}
+
 void OnFloorStart() {
     g_curse.drain_steps = 0;
     g_owl_nearest = -1;
@@ -1577,6 +1687,10 @@ void OnFloorStart() {
     g_stride_held = false;
     TunaReset();
     StolenDrop();
+    g_mobius_mult = 1.0f;
+    g_mobius_steps = 0;
+    g_mobius_effect = nullptr;
+    std::ranges::fill(g_mobius_radius, 1.0f);
 }
 
 } // namespace dc::game::expanded

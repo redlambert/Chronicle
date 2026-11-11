@@ -12,6 +12,7 @@
 namespace dc::game {
 
 class CCollisionData;
+class CSHOT_EFFECT;
 class ClsMes;
 struct MONSTOR;
 
@@ -260,6 +261,27 @@ void StolenShotStep();
  * Each dungeon draw, beside the main character's effect: the stolen shots draw.
  */
 void StolenShotDraw();
+
+/**
+ * Each step Ruby holds a charge: Mobius Ring's growing damage, and the held ball's size.
+ */
+void RubyChargeStep(float charge_time, int ball_slot);
+
+/**
+ * The damage of a shot Ruby fires: Mobius Ring's after a held full charge, else damage.
+ */
+int RubyShotDamage(int damage);
+
+/**
+ * A shot Ruby just started in effect's slot: its size and hit radius, grown by Mobius Ring
+ * for a charged release, back to their own for anything else.
+ */
+void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged);
+
+/**
+ * How much larger than its description a shot effect slot hits (Mobius Ring's grown orbs).
+ */
+float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot);
 
 /**
  * A new floor begins: clears what each effect remembers of the last.

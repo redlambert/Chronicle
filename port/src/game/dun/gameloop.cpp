@@ -4553,6 +4553,13 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
         damage *= 2;
     }
 
+    // Dark Cloud Expanded: a charged release with Mobius Ring hits for what the charge built.
+    const bool charged = BtActStatus.action_no == 16;
+
+    if (charged) {
+        damage = expanded::RubyShotDamage(damage);
+    }
+
     // A repeat shot reuses the start and the way the first one took.
     if (repeat != 0) {
         if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) != -1) {
@@ -4561,6 +4568,7 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
             NowMainEffect->SetDmg(damage);
             NowMainEffect->SetRandomRate(2.0f);
             NowMainEffect->SetNoSound();
+            expanded::OnRubyShot(NowMainEffect, NowMainEffect->current_slot, charged);
         }
 
         return;
@@ -4578,8 +4586,9 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
             sceVu0CopyVector(ruby_effect_vec, BtActStatus.target_position);
         }
 
-        // Dark Cloud Expanded: Steal Shot fires the stolen projectile in the quick shot's place.
-        if (RubyStolenShot(damage)) {
+        // Dark Cloud Expanded: Steal Shot fires the stolen projectile in the quick shot's place;
+        // a charged release stays her own.
+        if (!charged && RubyStolenShot(damage)) {
             return;
         }
 
@@ -4590,6 +4599,7 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
         NowMainEffect->SetWepStatus(NowWeaponHave->flags);
         NowMainEffect->SetVsMonster(NowWeaponHave->vs_monster);
         NowMainEffect->SetDmg(damage);
+        expanded::OnRubyShot(NowMainEffect, NowMainEffect->current_slot, charged);
         return;
     }
 
@@ -4602,7 +4612,7 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
     ruby_effect_vec[2] += ruby_effect_pos[2];
 
     // Dark Cloud Expanded: Steal Shot, as above.
-    if (RubyStolenShot(damage)) {
+    if (!charged && RubyStolenShot(damage)) {
         return;
     }
 
@@ -4610,6 +4620,7 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
         NowMainEffect->SetWepStatus(NowWeaponHave->flags);
         NowMainEffect->SetVsMonster(NowWeaponHave->vs_monster);
         NowMainEffect->SetDmg(damage);
+        expanded::OnRubyShot(NowMainEffect, NowMainEffect->current_slot, charged);
     }
 }
 
@@ -4635,6 +4646,7 @@ void BattleActionPlay_Ruby(CCharacter *chara, int aimed) {
             BtActStatus.charge_time = 0.0f;
             ruby_effect_id = NowMainEffect->Set(pos, aim, 3, element, 0, chara->frame->SearchFrame("item"), 0);
             NowMainEffect->SetLoop(1);
+            expanded::OnRubyShot(NowMainEffect, ruby_effect_id, false); // Dark Cloud Expanded: a fresh ball.
         }
 
         if (now >= 128.0f && now < 128.3f) {
@@ -4663,6 +4675,9 @@ void BattleActionPlay_Ruby(CCharacter *chara, int aimed) {
         BtActStatus.charge_time += 1.0f;
 
         BtActStatus.charge_time = std::min(BtActStatus.charge_time, 60.0f);
+
+        // Dark Cloud Expanded: Mobius Ring's damage grows while a full charge is held.
+        expanded::RubyChargeStep(BtActStatus.charge_time, ruby_effect_id);
 
         if (BtActStatus.charge_time >= 58.0f && BtActStatus.charge_time < 58.5f) {
             setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
