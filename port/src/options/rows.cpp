@@ -616,7 +616,9 @@ constexpr Row kGameRows[] = {
                                             "\"Element Quick Select\"\nD-pad Up in a dungeon\npicks the element."),
     OnOffRow<&Config::swap_keeps_lock_on>("game.swap_keeps_lock_on", "Swap Keeps Lock-On",
                                           "\"Swap Keeps Lock-On\"\nSwitching characters\nkeeps the enemy\nlocked on."),
-    OnOffRow<&Config::autosave>("game.autosave", "Autosave", "\"Autosave\"\nSaves on arriving in a\ntown or dungeon floor.")
+    OnOffRow<&Config::autosave>("game.autosave", "Autosave", "\"Autosave\"\nSaves on arriving in a\ntown or dungeon floor."),
+    OnOffRow<&Config::weapon_beep>("game.weapon_beep", "Weapon Beep",
+                                   "\"Weapon Beep\"\nBeeps while a weapon\nis about to break.")
 };
 
 constexpr Row kDisplayRows[] = {
@@ -700,6 +702,10 @@ constexpr Row kAudioRows[] = {
     NamedRow<&Config::soundtrack>("audio.soundtrack", "Soundtrack",
                                   "\"Soundtrack\"\nPS2: the game's music.\nCustom: your own\nrecordings, from the\nnext song.",
                                   "PS2|Custom"),
+    OnOffRow<&Config::music>("audio.music", "Music", "\"Music\"\nAll music. Off from\nthe next song."),
+    OnOffRow<&Config::battle_music>("audio.battle_music", "Battle Music",
+                                    "\"Battle Music\"\nThe music near enemies\nin a dungeon. Off: the\nfloor's ambience only."),
+    OnOffRow<&Config::voices>("audio.voices", "Voices", "\"Voices\"\nThe characters' shouts\nin battle."),
 };
 
 constexpr Row kControlRows[] = {

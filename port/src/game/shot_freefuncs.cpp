@@ -1,3 +1,4 @@
+#include "platform/config.hpp"
 #include "expanded_weapons.hpp"
 #include "shot_freefuncs.hpp"
 
@@ -391,6 +392,12 @@ float SetBattleStyle(int map_no, int preserve_bgm) {
 
         if (UserStatus->cur_floor < floors - 1) {
             BtBattleMusic_Excg(nearest, &bgm_volume, &ambient_volume);
+
+            // Dark Cloud Expanded: with Battle Music off, the floor keeps its ambience.
+            if (!platform::ConfigGet().battle_music) {
+                bgm_volume = 0.0f;
+                ambient_volume = 1.0f;
+            }
 
             if (ambient_volume > 0.0f) {
                 SndAmbientPlay(0);

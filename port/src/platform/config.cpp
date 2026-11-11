@@ -431,6 +431,18 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
     if (name == "game.swap_keeps_lock_on") {
         return ReadBool(value, config.swap_keeps_lock_on);
     }
+    if (name == "game.weapon_beep") {
+        return ReadBool(value, config.weapon_beep);
+    }
+    if (name == "audio.music") {
+        return ReadBool(value, config.music);
+    }
+    if (name == "audio.battle_music") {
+        return ReadBool(value, config.battle_music);
+    }
+    if (name == "audio.voices") {
+        return ReadBool(value, config.voices);
+    }
     if (name == "game.autosave") {
         return ReadBool(value, config.autosave);
     }
@@ -743,6 +755,7 @@ std::string ConfigSerialize(const Config &config) {
     root["game"]["element_quick_select"] = config.element_quick_select;
     root["game"]["swap_keeps_lock_on"] = config.swap_keeps_lock_on;
     root["game"]["autosave"] = config.autosave;
+    root["game"]["weapon_beep"] = config.weapon_beep;
     root["game"]["text_wipe"] = config.text_wipe;
     root["game"]["language"] = std::string(kLanguageNames[config.language >= 2 && config.language <= 6 ? config.language : 0]);
     const ConfigGameOptions &options = config.options;
@@ -783,6 +796,9 @@ std::string ConfigSerialize(const Config &config) {
     root["audio"]["master_volume"] = Shortest(config.master_volume);
     root["audio"]["sound"] = SoundName(config);
     root["audio"]["soundtrack"] = config.soundtrack ? "custom" : "ps2";
+    root["audio"]["music"] = config.music;
+    root["audio"]["battle_music"] = config.battle_music;
+    root["audio"]["voices"] = config.voices;
     root["input"]["mouse_sensitivity"] = Shortest(config.mouse_sensitivity);
     root["input"]["stick_sensitivity"] = Shortest(config.stick_sensitivity);
     root["input"]["stick_invert_x"] = config.stick_invert_x;

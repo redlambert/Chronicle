@@ -27,6 +27,7 @@
 #include "render/draw2d.hpp"
 #include "render/gs_state.hpp"
 #include "scriptinterpreter.hpp"
+#include "platform/config.hpp"
 #include "snd.hpp"
 #include "sound.hpp"
 #include "text/credits_text.hpp"
@@ -2103,6 +2104,11 @@ int SndBgmSyncBG() {
 }
 
 void SndBgmPlay(int track_no) {
+    // Dark Cloud Expanded: the Music option.
+    if (!platform::ConfigGet().music) {
+        return;
+    }
+
     if (bgm_off == 0 && now_bgm_no >= 0 && now_bgm_play != BgmPlayState::Playing) {
         CSnd.SQ_Play(MIDI_PORT_BGM, track_no);
         now_bgm_vol = SndGetDefaultBgmVol();
@@ -2393,6 +2399,11 @@ int SndSoundSyncBG() {
 void SndSePlay(int se_no, int vol, int voice) {
     const SND_SE_INFO *info = GetSeInfo(se_no);
 
+    // Dark Cloud Expanded: the Voices option silences the voice bank's port.
+    if (info != nullptr && !platform::ConfigGet().voices && GetPortNo(se_no) == MIDI_PORT_UNK_B) {
+        return;
+    }
+
     if (info != nullptr) {
         if (info->vol_no < 0) {
             vol = 127;
@@ -2415,6 +2426,11 @@ namespace {
  */
 void SndSePlay(int se_no, float volume, float pan, int voice) {
     const SND_SE_INFO *info = GetSeInfo(se_no);
+
+    // Dark Cloud Expanded: the Voices option silences the voice bank's port.
+    if (info != nullptr && !platform::ConfigGet().voices && GetPortNo(se_no) == MIDI_PORT_UNK_B) {
+        return;
+    }
 
     if (info != nullptr) {
         int       vol = SndGetVolf(se_no, volume);

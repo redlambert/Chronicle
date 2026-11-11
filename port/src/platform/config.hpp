@@ -49,6 +49,10 @@ struct Config : HostSettings {
     bool element_quick_select = false;
     bool swap_keeps_lock_on = false;
     bool autosave = true;
+    bool weapon_beep = true;  /**< Dark Cloud Expanded: the nearly-broken weapon's warning beep. */
+    bool music = true;        /**< Dark Cloud Expanded: all music. */
+    bool battle_music = true; /**< Dark Cloud Expanded: the dungeon's battle music. */
+    bool voices = true;       /**< Dark Cloud Expanded: the characters' voices. */
     bool text_wipe = false; /**< Enables the developer text comparison and tuning tool. */
 #if defined(__SWITCH__)
     bool interpolation = false;

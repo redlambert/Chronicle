@@ -125,6 +125,7 @@ void SetMainSelectParam(std::string_view text) {
 
 bool g_menu_chord_held = false;
 bool g_debug_r3_held = false;
+int  g_soft_reset_frames = 0;
 
 std::vector<int> g_give;
 
@@ -679,6 +680,27 @@ void GameCheckDebugToggle() {
     std::println(stderr, "debug mode {}", DebugMode ? "on" : "off");
 }
 
+// Dark Cloud Enhanced: L1, L2, R1, R2, Select and Start held for three seconds in a town or dungeon
+// go back to the title screen.
+bool SoftResetRequested() {
+    constexpr std::uint16_t chord = kInputL1 | kInputR1 | kInputL2 | kInputR2 | kInputSelect | kInputStart;
+    constexpr int           kHoldFrames = 3 * 60;
+
+    const bool held = (InputGetPad(0).buttons & chord) == chord;
+
+    if (!held || (mode != GAME_MODE_EDIT && mode != GAME_MODE_DUNGEON)) {
+        g_soft_reset_frames = 0;
+        return false;
+    }
+
+    if (++g_soft_reset_frames < kHoldFrames) {
+        return false;
+    }
+
+    g_soft_reset_frames = 0;
+    return true;
+}
+
 // The pad as the host latched it, so a mode that has locked the game's pad (an event, a fade) still
 // leaves. Only the press of the chord counts: held into the next mode, it does not leave that too.
 bool GameDeveloperMenuRequested() {
@@ -971,6 +993,11 @@ int RunGame([[maybe_unused]] int argc, [[maybe_unused]] char **argv) {
             }
 
             if (result == 0 && battlemenu::TakeBattleMenuTitleRequest()) {
+                ReturnToTitle();
+                break;
+            }
+
+            if (result == 0 && SoftResetRequested()) {
                 ReturnToTitle();
                 break;
             }

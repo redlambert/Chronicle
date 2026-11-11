@@ -1,4 +1,5 @@
 #include "clsmes.hpp"
+#include "expanded_text.hpp"
 #include "expanded_weapons.hpp"
 #include "mathconst.h"
 
@@ -1072,7 +1073,8 @@ short *ClsMes::GetTextLineDataTop(int line) {
         return text;
     }
 
-    return FindMessage(this->buff, line);
+    // Dark Cloud Expanded: spelling and spacing fixes to the game's own text.
+    return expanded::FixText(FindMessage(this->buff, line));
 }
 
 short *ClsMes::GetTextLineDataTop_system(int line) {
@@ -1081,7 +1083,8 @@ short *ClsMes::GetTextLineDataTop_system(int line) {
 
     for (int i = 0; i < count; i++) {
         if (line == body[i * 2 + 1]) {
-            return &body[count + body[i * 2 + 2]];
+            // Dark Cloud Expanded: spelling and spacing fixes to the game's own text.
+            return expanded::FixText(&body[count + body[i * 2 + 2]]);
         }
     }
 
