@@ -28,6 +28,7 @@
 #include "mds.hpp"
 #include "menuetc.hpp"
 #include "monstorunit.hpp"
+#include "motionmodel.hpp"
 #include "randomitem.hpp"
 #include "savedata.hpp"
 #include "shot_effect_pack.hpp"
@@ -77,7 +78,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_BUSTER_SWORD, "Buster Boost: makes\nAnti attachments\nstronger."},
     {ITEM_WEAPON_KITCHEN_KNIFE, "Enter a spring: bigger\nblade, 2x attack and\nfull WHP for 60 sec."},
     {ITEM_WEAPON_TSUKIKAGE, "Quick first swing.\nMoonlit Focus: charge\nattacks fill faster."},
-    {ITEM_WEAPON_SUN_SWORD, "Solar Harvest: rare\nchance an enemy drops\na Sun."},
+    {ITEM_WEAPON_SUN_SWORD, "Kills may drop a Sun.\nGuard 1.5 sec; the next\nswing blinds enemies."},
     {ITEM_WEAPON_MACHO_SWORD, "Owned: every weapon\nabsorbs ABS to 2x max.\nExtra carries over."},
     {ITEM_WEAPON_SHAMSHIR, "Swift Strikes:\na faster combo."},
     {ITEM_WEAPON_DARK_CLOUD, "Guard Crush: cuts\nthrough any enemy's\nguard."},
@@ -448,6 +449,126 @@ void WhpStep() {
 
     g_whp_bill = 0.0f;
     g_whp_item = -1;
+}
+
+// ── Sun Sword "Solar Flash" ─────────────────────────────────────────────────────────────────
+
+// Guard held a second and a half primes the blade; the next swing that lands lets it go. Every
+// enemy within 300 units takes a quarter of the attack and a shove, and is blinded (stopped)
+// for five seconds. One flash at a time: no new charge until the last one's blindness ends. A
+// primed blade left unused for ten seconds lapses. The flash costs 5 WHP.
+constexpr int   kSolarChargeSteps = 90;
+constexpr int   kSolarPrimedSteps = 10 * kStepsPerSecond;
+constexpr int   kSolarBlindSteps = 5 * kStepsPerSecond;
+constexpr float kSolarRadius = 300.0f;
+constexpr float kSolarDamage = 0.25f;
+constexpr float kSolarHitRadius = 25.0f;
+constexpr float kSolarKickSpeed = 2.0f;
+constexpr float kSolarKickDecay = 0.3f;
+constexpr float kSolarWhp = 5.0f;
+constexpr int   kGuarding = 5;
+
+enum class Solar { Idle, Charging, Primed };
+
+Solar g_solar = Solar::Idle;
+int   g_solar_steps = 0;
+int   g_solar_blind = 0;
+
+bool SolarFlashes(int item_no) {
+    return item_no == ITEM_WEAPON_SUN_SWORD;
+}
+
+void SolarStep(int held) {
+    if (g_solar_blind > 0) {
+        g_solar_blind--;
+    }
+
+    if (!SolarFlashes(held)) {
+        g_solar = Solar::Idle;
+        return;
+    }
+
+    const bool guarding = BtActStatus.guard_mode == kGuarding;
+
+    switch (g_solar) {
+        case Solar::Idle:
+            if (guarding && g_solar_blind == 0) {
+                g_solar = Solar::Charging;
+                g_solar_steps = 0;
+            }
+
+            break;
+        case Solar::Charging:
+            if (!guarding || g_solar_blind > 0) {
+                g_solar = Solar::Idle;
+            } else if (++g_solar_steps >= kSolarChargeSteps) {
+                // Primed: the game's own charge flash on Toan.
+                g_solar = Solar::Primed;
+                g_solar_steps = 0;
+                setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
+            }
+
+            break;
+        case Solar::Primed:
+            if (++g_solar_steps >= kSolarPrimedSteps) {
+                g_solar = Solar::Idle;
+            }
+
+            break;
+    }
+}
+
+/**
+ * The flash, as a primed swing lands: a hit on every enemy in reach, each stopped for the
+ * blindness.
+ */
+void SolarFlash() {
+    if (g_solar != Solar::Primed || NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    g_solar = Solar::Idle;
+    g_solar_blind = kSolarBlindSteps;
+
+    const int damage = std::max(1, static_cast<int>(static_cast<float>(NowWeaponHave->attack) * kSolarDamage));
+
+    for (int m = 0; m < 16; m++) {
+        MONSTOR &monster = NowMonstorUnit->monster[m];
+
+        if (monster.state != 2 || monster.hp <= 0 || monster.player_distance <= 0.0f || monster.player_distance > kSolarRadius) {
+            continue;
+        }
+
+        sceVu0FVECTOR at;
+        NowMonstorUnit->chara[m][0].GetPosition(at);
+
+        const auto &spheres = NowMonstorUnit->effect[m];
+
+        for (int sphere = 0; sphere < 16; sphere++) {
+            if (spheres.timer[sphere] != 0) {
+                at[0] = spheres.position[sphere][0];
+                at[1] = spheres.position[sphere][1];
+                at[2] = spheres.position[sphere][2];
+                break;
+            }
+        }
+
+        NowColData->Set(at, damage, 1, kSolarHitRadius, 0.0f, 2, 2, 0, 0);
+
+        auto &hit = NowColData->hit[NowColData->now_hit];
+        hit.vs_monster = NowWeaponHave->vs_monster;
+        hit.weapon_flags = NowWeaponHave->flags;
+        hit.flags = GetWeaponElementAttr(NowWeaponHave->best_elem);
+        hit.owner = CHARA_TOAN;
+        hit.attack_no = 0;
+        NowColData->SetKickBack(CharaMain.pos, kSolarKickSpeed, kSolarKickDecay, 2);
+
+        monster.stop_timer = std::max(monster.stop_timer, kSolarBlindSteps);
+    }
+
+    // A white pulse on Toan as the room is blinded.
+    setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+    DrainWhp(NowWeaponHave->item_no, kSolarWhp);
 }
 
 // ── Heaven's Cloud "Typhoon" ────────────────────────────────────────────────────────────────
@@ -1579,6 +1700,9 @@ void ToanKickBack(float *origin, float speed, float decay) {
     }
 
     NowColData->SetKickBack(origin, speed, decay, 2);
+
+    // Solar Flash: the primed blade lets go as this swing lands.
+    SolarFlash();
 }
 
 float ToanHitSphere(float *hit_pos, float radius) {
@@ -1640,6 +1764,7 @@ void DungeonStep() {
     }
 
     TyphoonStep(held);
+    SolarStep(held);
     BladeStep(held);
     WiseOwlStep();
     WhpStep();
@@ -2439,6 +2564,8 @@ void OnFloorStart() {
     std::ranges::fill(g_mobius_radius, 1.0f);
     g_typhoon_factor = 1.0f;
     g_typhoon_steps = -1;
+    g_solar = Solar::Idle;
+    g_solar_blind = 0;
     g_whp_bill = 0.0f;
     g_whp_item = -1;
 }
