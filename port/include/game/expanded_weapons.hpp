@@ -315,6 +315,12 @@ void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged);
 float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot);
 
 /**
+ * The floor's monster models are about to load: drops every borrowed shot copied from the last
+ * ones, whose models and textures are about to be overwritten.
+ */
+void OnMonstersLoading();
+
+/**
  * A new floor begins: clears what each effect remembers of the last.
  */
 void OnFloorStart();

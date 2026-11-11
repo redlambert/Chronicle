@@ -2126,6 +2126,12 @@ float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot) {
     return g_mobius_radius[slot];
 }
 
+void OnMonstersLoading() {
+    g_stolen.Drop();
+    g_breath.Drop();
+    g_pellets = {};
+}
+
 void OnFloorStart() {
     g_curse.drain_steps = 0;
     g_owl_nearest = -1;

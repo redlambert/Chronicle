@@ -2449,6 +2449,9 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
 }
 
 int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDataAlloc2<1> *alloc) {
+    // Dark Cloud Expanded: copies of the last monsters' projectiles go before new models load.
+    expanded::OnMonstersLoading();
+
     MONSTOR_MODEL *description = &MonstorTable[model_no];
     CFrameAttr     attr;
     int            file_size = 0;
