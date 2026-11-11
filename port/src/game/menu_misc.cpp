@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "menu_misc.hpp"
 
 #include <algorithm>
@@ -462,6 +463,11 @@ float GetNowWeaponRate(WEAPON_HAVE *weapon) {
 
 int WeaponStatusBreakEnable(WEAPON_HAVE *weapon) {
     if (weapon == nullptr) {
+        return 0;
+    }
+
+    // Dark Cloud Expanded: Sevenfold Rite keeps a 7 Branch Sword whole below +7.
+    if (weapon->item_no == ITEM_WEAPON_7BRANCH_SWORD && weapon->level < expanded::kSevenfoldLevel) {
         return 0;
     }
 
@@ -1630,14 +1636,14 @@ namespace {
 /**
  * Lowers one randomly chosen value of a weapon's status array, not below zero.
  */
-void LocalWeaponDataChange(char *values, int count, int base, int range) {
+void LocalWeaponDataChange(char *values, int count, int base, int range, int multiplier = 1) {
     if (values == nullptr) {
         printf("target is NULL\n");
         return;
     }
 
     int   selected = rand() % count;
-    int   reduction = base + rand() % range;
+    int   reduction = (base + rand() % range) * multiplier;
     char &value = values[selected];
     value -= reduction;
 
@@ -1676,8 +1682,10 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
             if (IsDefaultWeapon(weapon->item_no) >= 0) {
                 printf("default Weapon\n");
             } else {
-                int stat = rand() % 4;
-                int loss = rand() % 3 + 2;
+                // Dark Cloud Expanded: Circle Amplifier scales every loss by its multiplier.
+                const int amp = expanded::CircleMultiplier();
+                int       stat = rand() % 4;
+                int       loss = rand() % (2 * amp + 1) + 2 * amp;
 
                 switch (stat) {
                     case 0:
@@ -1716,10 +1724,10 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
                         break;
                 }
 
-                LocalWeaponDataChange(weapon->elem, 5, 2, 3);
-                LocalWeaponDataChange(weapon->vs_monster, 3, 2, 2);
-                LocalWeaponDataChange(&weapon->vs_monster[3], 3, 2, 2);
-                LocalWeaponDataChange(&weapon->vs_monster[6], 4, 2, 2);
+                LocalWeaponDataChange(weapon->elem, 5, 2, 3, amp);
+                LocalWeaponDataChange(weapon->vs_monster, 3, 2, 2, amp);
+                LocalWeaponDataChange(&weapon->vs_monster[3], 3, 2, 2, amp);
+                LocalWeaponDataChange(&weapon->vs_monster[6], 4, 2, 2, amp);
             }
 
             break;
@@ -1727,7 +1735,8 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
             if (IsDefaultWeapon(weapon->item_no) >= 0) {
                 printf("this weapon No.%d is default\n", weapon->item_no);
             } else {
-                int add = rand() % 3 + 3;
+                const int amp = expanded::CircleMultiplier();
+                int       add = rand() % (2 * amp + 1) + 3 * amp;
                 weapon->durability += add;
 
                 if (weapon->durability > 99) {
@@ -1741,7 +1750,8 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
             break;
         case RGATE_WHP_DOWN:
             if (IsDefaultWeapon(weapon->item_no) < 0) {
-                int loss = rand() % 3 + 3;
+                const int amp = expanded::CircleMultiplier();
+                int       loss = rand() % (2 * amp + 1) + 3 * amp;
                 weapon->durability -= loss;
                 float durability = weapon->durability;
 
@@ -1782,7 +1792,8 @@ int WeaponDataChangeByRGate(WEAPON_HAVE *weapon, int kind) {
 
             break;
         case RGATE_WHP_QUARTER: {
-            float durability = weapon->durability_f / 4.0f;
+            // Dark Cloud Expanded: amplified, the quartering leaves 1 WHP.
+            float durability = expanded::CircleMultiplier() > 1 ? 1.0f : weapon->durability_f / 4.0f;
             weapon->durability_f = durability;
 
             if (durability < 1.0f) {

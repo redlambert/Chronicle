@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "runscript_opcodes.hpp"
 
 #include <array>
@@ -706,6 +707,11 @@ int _GET_RAND(RS_STACKDATA *stack, int /*argc*/) {
 
     int roll = static_cast<int>(static_cast<float>(bound) * rand() / 2147483648.0f);
 
+    // Dark Cloud Expanded: Gravedigger keeps a dying undead's revive roll from coming up.
+    if (int forced = expanded::ScriptRandom(bound); forced != -1) {
+        roll = forced;
+    }
+
     SetStack(stack, roll);
     return 1;
 }
@@ -715,8 +721,14 @@ int _GET_RAND(RS_STACKDATA *stack, int /*argc*/) {
  */
 int _GET_RANDF(RS_STACKDATA *stack, int /*argc*/) {
     float bound = GetStackFloat(stack++);
+    auto  roll = static_cast<float>(static_cast<int>(bound * rand() / 2147483648.0f));
 
-    SetStack(stack, static_cast<float>(static_cast<int>(bound * rand() / 2147483648.0f)));
+    // Dark Cloud Expanded: Gravedigger, as in _GET_RAND.
+    if (int forced = expanded::ScriptRandom(static_cast<int>(bound)); forced != -1) {
+        roll = static_cast<float>(forced);
+    }
+
+    SetStack(stack, roll);
     return 1;
 }
 

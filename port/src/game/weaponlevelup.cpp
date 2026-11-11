@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "weaponlevelup.hpp"
 
 #include <array>
@@ -430,7 +431,8 @@ void CWeaponLevelUp::SetLevelUpWeaponData() {
         weapon->durability = 99;
     }
 
-    weapon->experience = 0;
+    // Dark Cloud Expanded: Overtraining carries ABS past the max into the new level.
+    weapon->experience = expanded::LevelUpCarry(weapon);
 }
 
 void CWeaponLevelUp::SetStatusBreak(WEAPON_HAVE *have, CCharacter *character, CWeaponLevelUp *load_buffer, int tex_block) {
@@ -456,11 +458,14 @@ void CWeaponLevelUp::SetStatusBreak(WEAPON_HAVE *have, CCharacter *character, CW
 
     const std::array<s16, 4> base_stats = {weapon->attack, weapon->endurance, weapon->speed, weapon->magic};
 
+    // Dark Cloud Expanded: Sevenfold Rite breaks a 7 Branch Sword into a 77% sphere, not 60%.
+    const float transfer = expanded::StatusBreakFactor(weapon->item_no);
+
     for (int i = 0; i < 4; i++) {
-        status_stats[i] = 0.6f * static_cast<float>(base_stats[i]);
+        status_stats[i] = transfer * static_cast<float>(base_stats[i]);
     }
 
-    float scale = 0.6f;
+    float scale = transfer;
 
     for (int i = 0; i < 5; i++) {
         status_elements[i] = weapon->elem[i] * scale;
@@ -490,7 +495,7 @@ void CWeaponLevelUp::SetStatusBreak(WEAPON_HAVE *have, CCharacter *character, CW
         }
     }
 
-    AttachMentValuePlus(reinterpret_cast<ATTACH_LIST *>(&status_item_no), &total, 0.6f);
+    AttachMentValuePlus(reinterpret_cast<ATTACH_LIST *>(&status_item_no), &total, transfer);
     flags = CheckWeaponOptionStatus(flags);
     CDngStatusData *dng_status = SaveData->GetDngStatus();
     int             slot_no = GetBoardSpace(0x5A, &page);

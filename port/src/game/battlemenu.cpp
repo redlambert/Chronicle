@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 
+#include "expanded_weapons.hpp"
 #include "battle_globals.hpp"
 #include "battlemenu.hpp"
 #include "battlemenu/internal.hpp"
@@ -4384,6 +4385,9 @@ void WeaponMenuAttachWepKey() {
             ComMenuSePlay(SE_ATTACHMENT_REMOVE);
             s16 held = BtlHaveItemPt->item_no;
             s16 item_no = weapon->attach[hole].item_no;
+
+            // Dark Cloud Expanded: Buster Boost stays with the Buster Sword.
+            expanded::OnDetach(weapon, hole);
             MenuDataSwap(&WepMenu.board.held_attach, &weapon->attach[hole]);
             BtlHaveItemPt->item_no = item_no;
             weapon->attach[hole].item_no = held;
@@ -4406,8 +4410,12 @@ void WeaponMenuAttachWepKey() {
         ComMenuSePlay(SE_ATTACHMENT_SET);
         s16 item_no = weapon->attach[hole].item_no;
         s16 held = BtlHaveItemPt->item_no;
+        expanded::OnDetach(weapon, hole);
         MenuDataSwap(&weapon->attach[hole], &WepMenu.board.held_attach);
         weapon->attach[hole].item_no = held;
+
+        // Dark Cloud Expanded: Buster Boost on the attachment just set.
+        expanded::OnAttach(weapon, hole);
         BtlHaveItemPt->item_no = item_no;
         BtlHaveItemPt->from_slot = WepMenu.board.cursor;
         BtlHaveItemPt->from_page = WepMenu.mode;

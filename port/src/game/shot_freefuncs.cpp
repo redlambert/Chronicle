@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "shot_freefuncs.hpp"
 
 #include <libvu0.h>
@@ -241,7 +242,12 @@ void WaterSplash_Init() {
 }
 
 void HealingWater() {
-    if (CheckHealZone() || CheckHealingWater()) {
+    const bool in_spring = CheckHealZone() || CheckHealingWater();
+
+    // Dark Cloud Expanded: the Kitchen Knife's blessing comes from the spring.
+    expanded::SpringStep(in_spring);
+
+    if (in_spring) {
         if (healingSpeed <= 0) {
             const int chara = UserStatus->cur_chara;
             UserStatus->AddDrink(chara, 0xFF, 255.0f);
@@ -577,7 +583,8 @@ void topStatusInfo(int y, int selected_item, int floor) {
     MGFillBox(CRect_i_(0x340, ((y + 0x1F) >> 1) * 16, (width - 1) * 16, 0x10), 0x40, 0x40, 0x40, alpha);
 
     if (weapon->experience > 0) {
-        int filled = static_cast<int>(static_cast<float>(weapon->experience) * (static_cast<float>(width) / static_cast<float>(exp_max)));
+        // Dark Cloud Expanded: Overtraining's ABS past the max leaves the bar full, not past it.
+        int filled = static_cast<int>(static_cast<float>(std::min<int>(weapon->experience, exp_max)) * (static_cast<float>(width) / static_cast<float>(exp_max)));
         MGFillBox(CRect_i_(0x340, ((y + 0x1F) >> 1) * 16, (filled - 1) * 16, 0x10), 0, 0xA2, 0xFF, alpha);
     }
 
@@ -788,6 +795,11 @@ void BtStatusErrStep() {
 
 void BtSetStatusErr(int status) {
     const int chara = UserStatus->cur_chara;
+
+    // Dark Cloud Expanded: Hero's Courage and Jealous Soul turn some ailments away.
+    if (expanded::AilmentBlocked(status)) {
+        return;
+    }
 
     switch (status) {
         case AILMENT_FREEZE:

@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "dun/gameloop.hpp"
 
 #include <libvu0.h>
@@ -110,7 +111,8 @@ constexpr std::array<s32, 6> defWeapon__6 = {ITEM_WEAPON_DAGGER_BROKEN, ITEM_WEA
 float CharaRangeRate(CUserStatus *status) {
     constexpr std::array<float, 6> range_rate = {1.2f, 1.4f, 1.1f, 1.5f, 1.0f, 1.8f};
 
-    return range_rate[status->cur_chara];
+    // Dark Cloud Expanded: the Cross Hinder line reaches twice as far.
+    return range_rate[status->cur_chara] * expanded::LockOnRate();
 }
 
 /**
@@ -3092,6 +3094,9 @@ void motionDrive() {
         heal_counter = 0;
     }
 
+    // Dark Cloud Expanded: the weapon effects that run every step on a floor.
+    expanded::DungeonStep();
+
     UserStatus->Step(0);
     float dry = UserStatus->water_now[UserStatus->cur_chara];
 
@@ -3865,8 +3870,15 @@ int BtCheckDamageProc() {
             }
 
             int            damage = NowColData->Get(hit_no)->damage;
-            int            guard = UserStatus->defense[static_cast<int>(UserStatus->cur_chara)];
+            // Dark Cloud Expanded: Defensive Legacy adds to the guard.
+            int            guard = UserStatus->defense[static_cast<int>(UserStatus->cur_chara)] + expanded::DefenseBonus();
             COLLISION_HIT *hit = &NowColData->hit[hit_no];
+
+            // Dark Cloud Expanded: Divine Guard. Retail's guard only stops the lighter hit kinds
+            // (2 and 4); held with 7th Heaven it stops a heavy one too, as one of those.
+            if (blown != 0 && hit->kind == 3 && expanded::PerfectGuard()) {
+                hit->kind = 2;
+            }
 
             // Dark Cloud Expanded: a hit breaks the player's freeze. The freeze ends as its timer
             // would end it, but any other ailment (a curse) stays, and the hit loses its freeze
@@ -5343,6 +5355,9 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
     int          kind = trap->kind;
     s16          item_no = weapon->item_no;
 
+    // Dark Cloud Expanded: Circle Amplifier works every circle two or three times over.
+    const int amp = expanded::CircleMultiplier();
+
     // The first two weapons of each character turn every trap into the stamina trap.
     if (item_no == defWeapon__6[chara] || item_no == defWeapon__6[chara] + 1) {
         kind = TRAP_CIRCLE_STAMINA;
@@ -5351,11 +5366,16 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
     switch (kind) {
         case TRAP_CIRCLE_STAMINA:
             BtSetStatusErr(AILMENT_STAMINA);
+
+            if ((status->ailments[chara] & AILMENT_STAMINA) != 0) {
+                status->ailment_frames[chara] *= amp;
+            }
+
             se = 0xE1;
             break;
         case TRAP_CIRCLE_MONEY_UP: {
-            had_copy *= 1.2f;
-            int added = had_copy + 10;
+            had_copy *= 1.0f + 0.2f * static_cast<float>(amp);
+            int added = had_copy + 10 * amp;
 
             if (had + added >= 0xFFFF) {
                 status->money = 0xFFFF;
@@ -5368,6 +5388,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
         }
         case TRAP_CIRCLE_ABS_FULL:
             element = RGATE_ABS_FULL;
+            expanded::CircleReward(ITEM_POWERUP_POWDER);
             se = 0xE1;
             break;
         case TRAP_CIRCLE_WHP_UP:
@@ -5376,6 +5397,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
             break;
         case TRAP_CIRCLE_WHP_CURE:
             element = RGATE_WHP_CURE;
+            expanded::CircleReward(ITEM_AUTO_REPAIR_POWDER);
             se = 0xE1;
             break;
         case TRAP_CIRCLE_ALL_MONSTER_STAMINA:
@@ -5383,7 +5405,7 @@ int Run_TrapCircle(MAP_TRAP_CIRCLE *trap) {
             se = 0xE2;
             break;
         case TRAP_CIRCLE_MONEY_DOWN: {
-            had_copy = static_cast<int>(had_copy - 0.2f * had_copy);
+            had_copy = static_cast<int>(had_copy - 0.2f * static_cast<float>(amp) * had_copy);
 
             had_copy = std::max(had_copy, 0);
 

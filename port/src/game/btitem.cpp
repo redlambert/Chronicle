@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "common.h"
 
 #include <libvu0.h>
@@ -453,6 +454,9 @@ int BtGetTreasureboxBig_Loop() {
 
 void BtGetTreasureboxSmall_Init(int dungeon) {
     int item_no = NowDngMap->boxes[NowDngMap->events[iventActive].index].item_no;
+
+    // Dark Cloud Expanded: Fine Fare upgrades what the chest holds.
+    item_no = expanded::ChestItem(item_no);
 
     ResetMovePower();
     int refusal = DngStatus()->CheckItemGet(item_no);

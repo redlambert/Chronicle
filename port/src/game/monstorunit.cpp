@@ -1,3 +1,4 @@
+#include "expanded_weapons.hpp"
 #include "monstorunit.hpp"
 
 #include <libvu0.h>
@@ -81,13 +82,6 @@ s32 PoisonDurationSteps(s16 status_chance) {
 bool UngagaChargeHit(const COLLISION_HIT &hit) {
     return hit.owner == CHARA_UNGAGA && hit.scale_rate != 0.0f;
 }
-
-/**
- * Dark Cloud Expanded: the Master Jacket's name number (MonstorTable entry 0), which the
- * Gladius's "Jacket Hunter" looks for, and the ABS multiple it gives on the kill.
- */
-constexpr s16 kMasterJacketName = 1;
-constexpr int kJacketHunterAbs = 4;
 
 /**
  * How tall the current character stands.
@@ -689,7 +683,8 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
 
 void CMonstorUnit::AllBin2() {
     for (MONSTOR &entry : monster) {
-        entry.anger_timer = 300;
+        // Dark Cloud Expanded: Circle Amplifier makes the rage last two or three times as long.
+        entry.anger_timer = 300 * expanded::CircleMultiplier();
     }
 }
 
@@ -1245,7 +1240,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
         }
     }
 
-    if (monster[current_monster].invincible_timer > 0) {
+    // Dark Cloud Expanded: No Fool's Gold lets Toan's hits reach a waking mimic.
+    if (monster[current_monster].invincible_timer > 0 && !expanded::PassesInvincibility(monster[current_monster])) {
         return result;
     }
 
@@ -1286,7 +1282,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                     }
                 }
 
-                if (hit != -1 && rejected == 0) {
+                // Dark Cloud Expanded: Guard Crush's hits pass every guard window.
+                if (hit != -1 && rejected == 0 && !expanded::PassesGuard(NowColData->GetUserID(hit))) {
                     for (int j = 0; j < 3; j++) {
                         if (guard[current_monster].active[j] != 0) {
                             float time = chara[current_monster][0].motion_type.state.time;
@@ -1571,6 +1568,11 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
 
                     if (effectiveness != nullptr) {
                         damage += damage * (0.015f * static_cast<float>(effectiveness[monster[index].attachment_kind]));
+                    }
+
+                    // Dark Cloud Expanded: Toan's held sword may add to the hit (Sanctifier).
+                    if (owner == CHARA_TOAN) {
+                        damage = expanded::ToanDamage(damage, monster[index]);
                     }
 
                     if (owner != -1) {
@@ -2238,13 +2240,14 @@ void CMonstorUnit::Step(int pause) {
 
                         if (monster[current_monster].last_attacker == current_chara && no_exp == 0) {
                             int max_exp = GetWeaponMaxExp(weapon);
-                            int exp = monster[current_monster].exp;
+                            // Dark Cloud Expanded: weapon effects scale the kill's ABS before the
+                            // back-floor and ABS Up boosts, and may add a drop of their own.
+                            int exp = expanded::KillAbs(monster[current_monster].exp, monster[current_monster], weapon);
 
-                            // Dark Cloud Expanded: the Gladius's "Jacket Hunter". A Master Jacket it
-                            // kills gives four times its ABS, before the back-floor and ABS Up boosts.
-                            if (weapon->item_no == ITEM_WEAPON_GLADIUS && monster[current_monster].name_no == kMasterJacketName) {
-                                exp *= kJacketHunterAbs;
-                            }
+                            sceVu0FVECTOR kill_position;
+                            chara[current_monster][0].GetPosition(kill_position);
+                            kill_position[1] -= monster[current_monster].ground_distance;
+                            expanded::OnKill(monster[current_monster], weapon, kill_position);
 
                             if (back_dungeon != 0) {
                                 exp *= 2;
@@ -2260,20 +2263,20 @@ void CMonstorUnit::Step(int pause) {
                                 if (weapon->experience <= 0) {
                                     weapon->experience = 0;
                                 }
-                            } else if (weapon->experience < max_exp) {
+                            } else if (weapon->experience < expanded::AbsCap(max_exp)) {
+                                // Dark Cloud Expanded: Overtraining lets the ABS run past the max, up
+                                // to its cap; the "ABS MAX" message still comes once, as the max is met.
                                 int updated = weapon->experience + exp;
 
-                                if (updated >= max_exp) {
-                                    weapon->experience = max_exp;
+                                if (weapon->experience < max_exp && updated >= max_exp) {
                                     DngMessMan.insert_mes_1 = GetCommonItemDataSystemMsg(weapon->item_no);
                                     DngMessMan.insert_value_1 = weapon->level;
                                     DngMessMan.message = 150;
                                     DngMessMan.timer = 480;
                                     DngMessMan.steev_window = false;
-                                    weapon->experience = max_exp;
-                                } else {
-                                    weapon->experience = updated;
                                 }
+
+                                weapon->experience = std::min(updated, expanded::AbsCap(max_exp));
                             }
                         }
 
