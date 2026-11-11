@@ -114,6 +114,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SUPERNOVA, "Hits may stop, poison,\nanger or slime the\nenemy at random."},
     {ITEM_WEAPON_SECRET_ARMLET, "Owned: bad magic\ncircles turn out as\ngood ones."},
     {ITEM_WEAPON_BLESSING_GUN, "Owned: bait is never\nlost while fishing."},
+    {ITEM_WEAPON_CACTUS, "Absorb: hits refill\nUngaga's water by a\ntenth of the damage."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -1385,6 +1386,28 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
         if (NowWeaponHave->experience < max_exp) {
             NowWeaponHave->experience = static_cast<s16>(std::min(max_exp, NowWeaponHave->experience + monster.exp / 2));
         }
+    }
+}
+
+void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount) {
+    // Absorb: the Cactus's hits fill Ungaga's water by a tenth of the damage they deal, ten
+    // to a drop, up to his gauge; rock, metal and undead foes give nothing. One hit a step
+    // counts, however many it lands.
+    constexpr std::array<s16, 20> kDry = {1, 3, 5, 25, 30, 31, 32, 33, 40, 55, 64, 69, 70, 77, 90, 91, 303, 317, 318, 319};
+    static int last_step = -1;
+
+    if (owner != CHARA_UNGAGA || amount <= 0 || HeldBy(CHARA_UNGAGA) != ITEM_WEAPON_CACTUS || last_step == g_step_count ||
+        std::ranges::find(kDry, monster.name_no) != kDry.end()) {
+        return;
+    }
+
+    last_step = g_step_count;
+
+    float      &water = UserStatus->water_now[CHARA_UNGAGA];
+    const float most = UserStatus->water_max[CHARA_UNGAGA];
+
+    if (water < most) {
+        water = std::min(most, water + static_cast<float>(amount) / 10.0f);
     }
 }
 

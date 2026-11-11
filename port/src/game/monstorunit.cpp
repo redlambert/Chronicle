@@ -1644,6 +1644,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                     BtActStatus.monstor_target = owner;
                     monster[current_monster].hp -= amount;
 
+                    // Dark Cloud Expanded: what the damage dealt feeds (the Cactus's Absorb).
+                    expanded::OnEnemyDamaged(monster[current_monster], owner, amount);
+
                     if (monster[current_monster].hp <= 0) {
                         monster[current_monster].last_attacker = owner;
                         monster[current_monster].hp = 0;

@@ -171,6 +171,11 @@ float EnemyDefense(float defense, const MONSTOR &monster, int owner);
 void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned);
 
 /**
+ * A hit from owner has just taken amount off monster's life (the Cactus's Absorb).
+ */
+void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount);
+
+/**
  * The WHP a wear of amount costs the active character's weapon: half for a nearly broken
  * Steel Slingshot.
  */
