@@ -23,6 +23,7 @@
 #include "frame.hpp"
 #include "framevu1.hpp"
 #include "gameutil.hpp"
+#include "hitvalue.hpp"
 #include "menu_inventory.hpp"
 #include "mds.hpp"
 #include "menuetc.hpp"
@@ -115,6 +116,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SECRET_ARMLET, "Owned: bad magic\ncircles turn out as\ngood ones."},
     {ITEM_WEAPON_BLESSING_GUN, "Owned: bait is never\nlost while fishing."},
     {ITEM_WEAPON_CACTUS, "Absorb: hits refill\nUngaga's water by a\ntenth of the damage."},
+    {ITEM_WEAPON_HEAVEN_S_CLOUD, "Typhoon: hold the\nwhirlwind charge to\ngrow the blade to 3x."},
+    {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -422,6 +425,70 @@ void WiseOwlStep() {
 /**
  * The Kitchen Knife's blessing running down, and the blade sizes of the held sword.
  */
+// ── Weapon HP an ability spends ─────────────────────────────────────────────────────────────
+
+// A bolt, a blast or a flash is paid for through the game's own wear, as if the sword had landed
+// that many swings: Endurance, Durable, Fragile, the warnings, Auto Repair Powder and the break
+// all stay the game's. It is paid on the next walking step, between frames, so a break never
+// lands in the middle of the effect that caused it.
+constexpr float kSwingWhp = 1.5f;
+
+float g_whp_bill = 0.0f;
+int   g_whp_item = -1;
+
+void WhpStep() {
+    if (g_whp_bill <= 0.0f || UserStatus == nullptr || NowWeaponHave == nullptr) {
+        return;
+    }
+
+    // The blade that was spent is gone from the hand: the bill goes with it.
+    if (NowWeaponHave->item_no == g_whp_item) {
+        SwordDmgCheck1(g_whp_bill, 0);
+    }
+
+    g_whp_bill = 0.0f;
+    g_whp_item = -1;
+}
+
+// ── Heaven's Cloud "Typhoon" ────────────────────────────────────────────────────────────────
+
+// Holding the whirlwind charge grows the blade, slowly at first and faster toward the end, to
+// three times its size over four seconds; the whirlwind keeps the size and hits as wide.
+constexpr float kTyphoonMost = 3.0f;
+constexpr int   kTyphoonSteps = 4 * kStepsPerSecond;
+constexpr float kTyphoonCurve = 2.5f;
+constexpr float kHeavensCloudHitBone = 9.2053f; // the stock blade's hit bone, units from the hand
+
+float g_typhoon_factor = 1.0f;
+int   g_typhoon_steps = -1;
+bool  g_typhoon_flashed = false;
+
+void TyphoonStep(int held) {
+    if (held != ITEM_WEAPON_HEAVEN_S_CLOUD) {
+        g_typhoon_factor = 1.0f;
+        g_typhoon_steps = -1;
+        g_typhoon_flashed = false;
+        return;
+    }
+
+    if (BtActStatus.action_no == 14 && BtActStatus.charge_level == 2) {
+        g_typhoon_steps = std::max(0, g_typhoon_steps) + 1;
+
+        const float t = std::min(1.0f, static_cast<float>(g_typhoon_steps) / kTyphoonSteps);
+        g_typhoon_factor = 1.0f + std::pow(t, kTyphoonCurve) * (kTyphoonMost - 1.0f);
+
+        // Full size: the charge's own flash says holding longer buys nothing more.
+        if (t >= 1.0f && !g_typhoon_flashed) {
+            g_typhoon_flashed = true;
+            setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
+        }
+    } else if (BtActStatus.action_no != 0x18) {
+        g_typhoon_factor = 1.0f;
+        g_typhoon_steps = -1;
+        g_typhoon_flashed = false;
+    }
+}
+
 void BladeStep(int held) {
     if (held != ITEM_WEAPON_KITCHEN_KNIFE && g_knife_bless_steps > 0) {
         g_knife_bless_steps = 0;
@@ -442,7 +509,9 @@ void BladeStep(int held) {
 
     float factor = 1.0f;
 
-    if (held == ITEM_WEAPON_CLAYMORE) {
+    if (held == ITEM_WEAPON_HEAVEN_S_CLOUD) {
+        factor = g_typhoon_factor;
+    } else if (held == ITEM_WEAPON_CLAYMORE) {
         factor = kClaymoreScale;
     } else if (held == ITEM_WEAPON_KITCHEN_KNIFE && g_knife_bless_steps > 0) {
         factor = kKnifeBlessedLength / kKnifeStockLength;
@@ -1016,6 +1085,19 @@ float               g_mobius_mult = 1.0f;
 int                 g_mobius_steps = 0;
 const CSHOT_EFFECT *g_mobius_effect = nullptr;
 float               g_mobius_radius[8] = {1, 1, 1, 1, 1, 1, 1, 1};
+int                 g_radius_chara = -1;
+
+/**
+ * The slot scales belong to chara from here: another character's are dropped.
+ */
+void RadiusOwner(const CSHOT_EFFECT *effect, int chara) {
+    if (g_mobius_effect != effect || g_radius_chara != chara) {
+        std::ranges::fill(g_mobius_radius, 1.0f);
+    }
+
+    g_mobius_effect = effect;
+    g_radius_chara = chara;
+}
 
 int MobiusDamage() {
     const float base = static_cast<float>(NowWeaponHave->attack + NowWeaponHave->magic);
@@ -1029,6 +1111,53 @@ float MobiusScale() {
 void SetSlotScale(CSHOT_EFFECT *effect, int slot, float scale) {
     float size[4] = {scale, scale, scale, 1.0f};
     effect->chara[slot].SetScale(size);
+}
+
+// ── Chronicle Sword ─────────────────────────────────────────────────────────────────────────
+
+// Each of Toan's hits reaches every other enemy within 300 units: half its damage within 50,
+// then a share falling with distance, down to a hundredth. The splash never kills: an enemy it
+// would finish is left on 1 HP and poisoned. Once a step, however many the hit itself lands on.
+constexpr float kSplashRange = 300.0f;
+constexpr float kSplashNear = 50.0f;
+
+int g_splash_step = -1;
+
+void ChronicleSplash(const MONSTOR &hit, int owner, int amount) {
+    if (owner != CHARA_TOAN || amount <= 0 || NowMonstorUnit == nullptr || ToanWeapon() != ITEM_WEAPON_CHRONICLE_SWORD ||
+        g_splash_step == g_step_count) {
+        return;
+    }
+
+    g_splash_step = g_step_count;
+
+    for (int m = 0; m < 16; m++) {
+        MONSTOR &other = NowMonstorUnit->monster[m];
+        const float distance = other.player_distance;
+
+        if (&other == &hit || other.state != 2 || other.hp <= 0 || distance <= 0.0f || distance >= kSplashRange) {
+            continue;
+        }
+
+        const float share = distance < kSplashNear ? 0.5f : std::max(1.0f, (kSplashRange - distance) / 5.0f) / 100.0f;
+        const int   damage = static_cast<int>(std::floor(static_cast<float>(amount) * share));
+
+        if (damage <= 0) {
+            continue;
+        }
+
+        if (other.hp - damage < 1) {
+            other.hp = 1;
+            other.poison_timer = 1;
+        } else {
+            other.hp -= damage;
+        }
+
+        sceVu0FVECTOR position;
+        NowMonstorUnit->chara[m][0].GetPosition(position);
+        position[1] += 10.0f;
+        HitValueEntry(NowHitValue, position, damage, HIT_VALUE_MONSTER, nullptr);
+    }
 }
 
 /**
@@ -1390,6 +1519,8 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
 }
 
 void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount) {
+    ChronicleSplash(monster, owner, amount);
+
     // Absorb: the Cactus's hits fill Ungaga's water by a tenth of the damage they deal, ten
     // to a drop, up to his gauge; rock, metal and undead foes give nothing. One hit a step
     // counts, however many it lands.
@@ -1454,7 +1585,19 @@ float ToanHitSphere(float *hit_pos, float radius) {
     // Greatsword: the grown blade carries its hit bone out to 1.8 times as far from the hand,
     // which would sail over anything close. One sphere spanning the stock reach to the grown
     // one keeps both: its centre midway along that span, its radius widened by half of it.
-    if (ToanWeapon() != ITEM_WEAPON_CLAYMORE || g_blade.frame == nullptr) {
+    // Typhoon's grown blade does the same.
+    float scale = 1.0f;
+    float bone = 0.0f;
+
+    if (ToanWeapon() == ITEM_WEAPON_CLAYMORE) {
+        scale = kClaymoreScale;
+        bone = kClaymoreHitBone;
+    } else if (ToanWeapon() == ITEM_WEAPON_HEAVEN_S_CLOUD) {
+        scale = g_typhoon_factor;
+        bone = kHeavensCloudHitBone;
+    }
+
+    if (scale <= 1.0f || g_blade.frame == nullptr) {
         return radius;
     }
 
@@ -1462,13 +1605,13 @@ float ToanHitSphere(float *hit_pos, float radius) {
     sceVu0FVECTOR origin = {0.0f, 0.0f, 0.0f, 1.0f};
     g_blade.frame->GetWorldPosition(hand, origin);
 
-    const float toward_hand = (kClaymoreScale - 1.0f) / (2.0f * kClaymoreScale);
+    const float toward_hand = (scale - 1.0f) / (2.0f * scale);
 
     for (int axis = 0; axis < 3; axis++) {
         hit_pos[axis] -= (hit_pos[axis] - hand[axis]) * toward_hand;
     }
 
-    return radius + kClaymoreHitBone * (kClaymoreScale - 1.0f) / 2.0f;
+    return radius + bone * (scale - 1.0f) / 2.0f;
 }
 
 // ── Every step on a floor ───────────────────────────────────────────────────────────────────
@@ -1496,8 +1639,10 @@ void DungeonStep() {
         CurseStep(held);
     }
 
+    TyphoonStep(held);
     BladeStep(held);
     WiseOwlStep();
+    WhpStep();
 
     // The allies' ongoing effects.
     g_step_count++;
@@ -2146,13 +2291,40 @@ void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged) {
     const float scale = charged && HeldBy(CHARA_RUBY) == ITEM_WEAPON_MOBIUS_RING ? MobiusScale() : 1.0f;
 
     SetSlotScale(effect, slot, scale);
-    g_mobius_effect = effect;
+    RadiusOwner(effect, CHARA_RUBY);
     g_mobius_radius[slot] = scale;
 }
 
+void OnToanWhirl(CSHOT_EFFECT *effect, int slot) {
+    if (effect == nullptr || slot < 0 || slot >= 8) {
+        return;
+    }
+
+    // Typhoon: the whirlwind is drawn and hits as wide as the grown blade.
+    const float scale = ToanWeapon() == ITEM_WEAPON_HEAVEN_S_CLOUD ? g_typhoon_factor : 1.0f;
+
+    SetSlotScale(effect, slot, scale);
+    RadiusOwner(effect, CHARA_TOAN);
+    g_mobius_radius[slot] = scale;
+}
+
+void DrainWhp(int item_no, float base_whp) {
+    if (NowWeaponHave == nullptr || NowWeaponHave->item_no != item_no || base_whp <= 0.0f) {
+        return;
+    }
+
+    if (g_whp_item != item_no) {
+        g_whp_bill = 0.0f;
+    }
+
+    g_whp_item = item_no;
+    g_whp_bill += base_whp / kSwingWhp;
+}
+
 float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot) {
-    // Only while Ruby is out: another character's effect reloads into the same instance.
-    if (effect != g_mobius_effect || slot < 0 || slot >= 8 || UserStatus == nullptr || UserStatus->cur_chara != CHARA_RUBY) {
+    // Only while the character they were set for is out: another's effect reloads into the
+    // same instance.
+    if (effect != g_mobius_effect || slot < 0 || slot >= 8 || UserStatus == nullptr || UserStatus->cur_chara != g_radius_chara) {
         return 1.0f;
     }
 
@@ -2263,7 +2435,12 @@ void OnFloorStart() {
     g_mobius_mult = 1.0f;
     g_mobius_steps = 0;
     g_mobius_effect = nullptr;
+    g_radius_chara = -1;
     std::ranges::fill(g_mobius_radius, 1.0f);
+    g_typhoon_factor = 1.0f;
+    g_typhoon_steps = -1;
+    g_whp_bill = 0.0f;
+    g_whp_item = -1;
 }
 
 } // namespace dc::game::expanded

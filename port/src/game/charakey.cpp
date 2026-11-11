@@ -465,6 +465,7 @@ void ToanKey_Play() {
                     NowMainEffect->SetDmg(static_cast<int>(1.5f * static_cast<float>(damage)));
                     NowMainEffect->SetWait(45);
                     NowMainEffect->SetAttribute(GetWeaponElementAttr(NowWeaponHave->best_elem));
+                    expanded::OnToanWhirl(NowMainEffect, NowMainEffect->current_slot); // Dark Cloud Expanded: Typhoon.
                     SwordDmgCheck1(3.0f, 0);
                     BtActStatus.action_no = 0x18;
                     BtActStatus.motion_no = 0x18;

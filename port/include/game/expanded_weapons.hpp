@@ -316,6 +316,17 @@ int RubyShotDamage(int damage);
 void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged);
 
 /**
+ * Toan's whirlwind just started in effect's slot: Typhoon's size and reach for it.
+ */
+void OnToanWhirl(CSHOT_EFFECT *effect, int slot);
+
+/**
+ * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid
+ * through the game's own wear on the next walking step, if that weapon is still in hand.
+ */
+void DrainWhp(int item_no, float base_whp);
+
+/**
  * How much larger than its description a shot effect slot hits (Mobius Ring's grown orbs).
  */
 float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot);
