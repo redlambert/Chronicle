@@ -2,6 +2,7 @@
 
 #include <libvu0.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -54,6 +55,32 @@ CTexAnimeData MonsterTexAnim[320];
 int maxFloorTbl__3[7] = {15, 17, 18, 18, 15, 25, 100};
 
 namespace {
+
+/**
+ * Dark Cloud Expanded: steps each monster slot has been poisoned for. Retail's poison re-arms
+ * itself forever; here it wears off after the monster's status chance x 2 seconds, and a hit
+ * that poisons it again does not restart the count.
+ */
+std::array<s32, 16> poisonSteps{};
+
+/**
+ * Steps a monster with this status chance stays poisoned, at 60 steps a second.
+ */
+s32 PoisonDurationSteps(s16 status_chance) {
+    constexpr s32 kSecondsPerChance = 2;
+    constexpr s32 kStepsPerSecond = 60;
+
+    return std::max<s32>(1, status_chance) * kSecondsPerChance * kStepsPerSecond;
+}
+
+/**
+ * Dark Cloud Expanded: whether a hit came from Ungaga's held charge. Each charged shot already
+ * costs its own weapon HP as it fires, so the hits it lands, blocked or not, cost nothing more.
+ * Shots planted by an effect carry a nonzero scale rate; his swings carry 0.
+ */
+bool UngagaChargeHit(const COLLISION_HIT &hit) {
+    return hit.owner == CHARA_UNGAGA && hit.scale_rate != 0.0f;
+}
 
 /**
  * How tall the current character stands.
@@ -1172,6 +1199,19 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
         monster[current_monster].anger_timer--;
     }
 
+    // Dark Cloud Expanded: poison wears off. A stop or a death that clears the poison also
+    // clears the count, so the next poisoning gets a fresh window.
+    if (monster[current_monster].poison_timer > 0) {
+        poisonSteps[current_monster]++;
+
+        if (poisonSteps[current_monster] >= PoisonDurationSteps(monster[current_monster].status_chance)) {
+            monster[current_monster].poison_timer = 0;
+            poisonSteps[current_monster] = 0;
+        }
+    } else {
+        poisonSteps[current_monster] = 0;
+    }
+
     if (monster[current_monster].poison_timer > 0) {
         monster[current_monster].palette_override[0] = 47.0f;
         monster[current_monster].palette_override[1] = 0.5f;
@@ -1260,7 +1300,8 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
 
                                 int owner = NowColData->hit[hit].owner;
 
-                                if (NowColData->hit[hit].attack_no == 0 && (owner == 0 || owner == 2 || owner == 4)) {
+                                if (NowColData->hit[hit].attack_no == 0 && (owner == 0 || owner == 2 || owner == 4) &&
+                                    !UngagaChargeHit(NowColData->hit[hit])) {
                                     SwordDmgCheck1(0.1f, monster[current_monster].hardness);
                                 }
 
@@ -1332,7 +1373,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
 
                     int attacker = NowColData->hit[hit].owner;
 
-                    if (attacker == 0 || attacker == 2 || attacker == 4) {
+                    if ((attacker == 0 || attacker == 2 || attacker == 4) && !UngagaChargeHit(NowColData->hit[hit])) {
                         SwordDmgCheck1(1.0f, monster[current_monster].hardness);
                     }
 
@@ -2293,6 +2334,7 @@ void CMonstorUnit::CleanViewMonstor(int back_floor) {
         monster[i].state = -1;
         monster[i].stop_timer = 0;
         monster[i].poison_timer = 0;
+        poisonSteps[i] = 0;
         monster[i].anger_timer = 0;
         monster[i].slow_timer = 0;
         monster[i].collision_poly_count = 0;

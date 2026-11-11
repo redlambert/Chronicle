@@ -3868,6 +3868,18 @@ int BtCheckDamageProc() {
             int            guard = UserStatus->defense[static_cast<int>(UserStatus->cur_chara)];
             COLLISION_HIT *hit = &NowColData->hit[hit_no];
 
+            // Dark Cloud Expanded: a hit breaks the player's freeze. The freeze ends as its timer
+            // would end it, but any other ailment (a curse) stays, and the hit loses its freeze
+            // so it only breaks the ice. Its other effects land as before.
+            if (StatusErrCheck(AILMENT_FREEZE) != 0) {
+                const int chara = UserStatus->cur_chara;
+
+                UserStatus->ailments[chara] &= ~AILMENT_FREEZE;
+                UserStatus->ailment_frames[chara] = 0;
+                BtActStatus.movement_locked = 0;
+                hit->flags &= ~(0x100 | 0x100000);
+            }
+
             if (StatusErrCheck(AILMENT_STAMINA) != 0) {
                 guard *= 2;
             }
