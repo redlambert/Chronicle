@@ -4372,8 +4372,8 @@ void EndAction(bool face_target = true) {
  * Puts a shot from the player's character in the first free slot, if there is one.
  */
 void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
-    // Dark Cloud Expanded: Steal Shot fires the stolen projectile in the pellet's place.
-    if (expanded::FireStolenShot(world, vector, damage, UserStatus->cur_chara)) {
+    // Dark Cloud Expanded: Steal Shot, the charged shots and Double Impact fire their own.
+    if (expanded::XiaoShot(NowShotData, world, vector, damage)) {
         return;
     }
 
@@ -4389,6 +4389,7 @@ void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
             shots->halted[i] = 0;
             shots->start_flag[i] = 0;
             shots->used[i] = 1;
+            expanded::OnPelletSpawned(i); // Dark Cloud Expanded: a plain pellet.
             break;
         }
     }
@@ -4411,6 +4412,11 @@ void BattleActionOn_Jinn() {
 void BattleActionPlay_Jinn(CCharacter *chara, int aimed) {
     float now = chara->motion_type.state.time;
     int   damage = NowWeaponHave->attack;
+
+    // Dark Cloud Expanded: holding the shot charges the Matador and Dragon's Y.
+    if (expanded::XiaoAimStep((BtActStatus.action_no == 11 || BtActStatus.action_no == 12) && GamePad.On(PadInput_OK) != 0)) {
+        SndSePlay(SE_POWER_UP, -1, 0);
+    }
 
     // A poisoned weapon hits twice as hard.
     if (StatusErrCheck(AILMENT_STAMINA) != 0) {

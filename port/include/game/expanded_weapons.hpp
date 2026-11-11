@@ -12,6 +12,7 @@
 namespace dc::game {
 
 class CCollisionData;
+class CSHOT;
 class CSHOT_EFFECT;
 class ClsMes;
 struct MONSTOR;
@@ -118,9 +119,10 @@ float ToanDamage(float damage, const MONSTOR &monster);
 bool PerfectGuard();
 
 /**
- * Whether Toan's hit lands through this monster's guard window.
+ * Whether a hit lands through this monster's guard window: Toan's with Guard Crush, or a
+ * charged Matador pellet's.
  */
-bool PassesGuard(int hit_owner);
+bool PassesGuard(int hit_owner, int hit);
 
 /**
  * Whether Toan's hits land on this monster while its script holds it invincible.
@@ -253,7 +255,36 @@ void OnSteal(const MONSTOR &monster, int owner);
 bool FireStolenShot(const float *origin, const float *direction, int damage, int owner);
 
 /**
- * Each step of the dungeon loop, beside the main character's effect: the stolen shots fly.
+ * Each step of Xiao's shot action, with whether she holds the shot back: the charge of the
+ * Matador and Dragon's Y. Returns true on the step the charge fills.
+ */
+bool XiaoAimStep(bool holding);
+
+/**
+ * Xiao is about to fire a pellet: Steal Shot, the charged shots and Double Impact fire their own
+ * in its place and return true; false lets the pellet go as it would.
+ */
+bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage);
+
+/**
+ * The game has just started a pellet in slot: it carries none of the mod's marks.
+ */
+void OnPelletSpawned(int slot);
+
+/**
+ * Before a pellet's collision each step: a ricochet still leaving the monster it bounced off is
+ * moved here instead, and true returned to skip the game's test and move.
+ */
+bool PelletDeparts(CSHOT *shots, int slot);
+
+/**
+ * A pellet has just planted its hit and ended, on a monster or not: the charged pellets' kick
+ * and guard pass, and the ricochet.
+ */
+void OnPelletHit(CSHOT *shots, int slot, bool monster);
+
+/**
+ * Each step of the dungeon loop, beside the main character's effect: the borrowed shots fly.
  */
 void StolenShotStep();
 

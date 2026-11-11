@@ -49,7 +49,8 @@ void CSHOT::step() {
             continue;
         }
 
-        if (halted[shot] == 0) {
+        // Dark Cloud Expanded: a ricochet still leaving the monster it bounced off moves on its own.
+        if (halted[shot] == 0 && !expanded::PelletDeparts(this, shot)) {
             SHOT_COLLISION_RESULT result = checkCollision(hit_position, pos[shot], vector[shot], 2, 2.0f);
 
             if (result == SHOT_COLLISION_NONE) {
@@ -65,6 +66,9 @@ void CSHOT::step() {
                 NowColData->hit[NowColData->now_hit].weapon_flags = NowWeaponHave->flags;
                 NowColData->hit[NowColData->now_hit].vs_monster = NowWeaponHave->vs_monster;
                 used[shot] = 0;
+
+                // Dark Cloud Expanded: the charged pellets' kick and guard pass, and the ricochet.
+                expanded::OnPelletHit(this, shot, result == SHOT_COLLISION_MONSTER);
             }
         }
 

@@ -1283,7 +1283,7 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                 }
 
                 // Dark Cloud Expanded: Guard Crush's hits pass every guard window.
-                if (hit != -1 && rejected == 0 && !expanded::PassesGuard(NowColData->GetUserID(hit))) {
+                if (hit != -1 && rejected == 0 && !expanded::PassesGuard(NowColData->GetUserID(hit), hit)) {
                     for (int j = 0; j < 3; j++) {
                         if (guard[current_monster].active[j] != 0) {
                             float time = chara[current_monster][0].motion_type.state.time;

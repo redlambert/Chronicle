@@ -99,7 +99,11 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SCORPION, "Its poison cures yours\nand soaks up half the\nenemy's ABS."},
     {ITEM_WEAPON_SNAIL, "Slime Trail: hits may\nleave enemies stuck."},
     {ITEM_WEAPON_SKUNK, "Its flamethrower\nreaches twice as far."},
-    {ITEM_WEAPON_DRAGON_S_Y, "Locks on from twice\nas far, and moves\nfaster when locked on."},
+    {ITEM_WEAPON_DRAGON_S_Y, "Hold for a 1.5x blast.\nLock-on reaches twice\nas far, moves faster."},
+    {ITEM_WEAPON_DOUBLE_IMPACT, "Fires two pellets at\n3/4 power each. Hits\nricochet onward."},
+    {ITEM_WEAPON_HARDSHOOTER, "Ricochet: a hit sends\na pellet on to the\nnext enemy."},
+    {ITEM_WEAPON_MATADOR, "Hold 1 sec: a 1.5x shot\nthat breaks guards and\nknocks enemies back."},
+    {ITEM_WEAPON_STAR_BREAKER, "Shooting Stars: kills\nmay drop an empty\nSynthSphere."},
     {ITEM_WEAPON_HALBERT, "Tornado: its charge\nshot flies faster\nand hits wider."},
     {ITEM_WEAPON_TALL_HAMMER, "Each hit shrinks the\nenemy, down to 30%\nof its size."},
     {ITEM_WEAPON_BANDIT_SLINGSHOT, "Steal Shot: a steal\ntakes the enemy's\nshot, at 2x damage."},
@@ -631,67 +635,116 @@ void TunaStep() {
     g_tuna_last_hp = UserStatus->hp[CHARA_GORO];
 }
 
-// ── Xiao and Ruby: Steal Shot ───────────────────────────────────────────────────────────────
+// ── Borrowed shots ──────────────────────────────────────────────────────────────────────────
 
-// A steal with the Bandit Slingshot or Bandit's Ring takes the victim's projectile: from then
-// until the next steal or the floor's end, Xiao's pellets and Ruby's quick shots are that shot,
-// at twice the damage. The shot is the monster's own, already loaded for the floor, copied into
-// an effect of the mod's own that hits enemies instead of the party.
-constexpr float kStolenDamage = 2.0f;
-constexpr int   kStolenSlots = 6;
-constexpr int   kStolenHitWait = 45;
-constexpr int   kPlayerTarget = 2;
+// A monster's projectile fired by the party: the monster's own effect, already loaded for the
+// floor, copied into an effect of the mod's own that hits enemies instead of the party. Steal
+// Shot and Dragon's Breath each keep one.
+constexpr int kBorrowedSlots = 6;
+constexpr int kBorrowedHitWait = 45;
+constexpr int kPlayerTarget = 2;
 
 // Self-destructs, where the monster bursts where it stands: nothing that flies to take.
 constexpr int kSelfBursts[] = {16, 17, 18};
 
-CSHOT_EFFECT   g_stolen;
-BT_SHOT_EFFECT g_stolen_data = {};
-bool           g_stolen_ready = false;
+struct BorrowedShot {
+    CSHOT_EFFECT          effect;
+    BT_SHOT_EFFECT        data = {};
+    bool                  ready = false;
+    const CSHOT_EFFECT   *source = nullptr;
+    const BT_SHOT_EFFECT *source_data = nullptr;
+    CMonstorUnit         *unit = nullptr;
+    int                   floor = -1;
+    int                   map = -1;
+    u_char               *frames;
+    int                   frame_quads;
+    CDataAlloc2<1>        alloc{-1};
 
-// What the stolen effect was built from, to drop it once any of it is gone.
-const CSHOT_EFFECT   *g_stolen_source = nullptr;
-const BT_SHOT_EFFECT *g_stolen_source_data = nullptr;
-CMonstorUnit         *g_stolen_unit = nullptr;
-int                   g_stolen_floor = -1;
-int                   g_stolen_map = -1;
+    BorrowedShot(u_char *storage, std::size_t bytes) : frames(storage), frame_quads(static_cast<int>(bytes / 16)) {}
 
-// The slots' own copies of the model's frames.
+    void Drop() {
+        effect.Initialize();
+        ready = false;
+        source = nullptr;
+        source_data = nullptr;
+        unit = nullptr;
+    }
+
+    /**
+     * Whether what it was built from still stands: the same floor, the same monsters and the
+     * monster's effect as it was.
+     */
+    bool Valid() {
+        if (!ready || UserStatus == nullptr) {
+            return false;
+        }
+
+        if (NowMonstorUnit != unit || UserStatus->cur_floor != floor || selectMapNo != map || source->effect_data != source_data) {
+            Drop();
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Builds it from the monster's effect: its description aimed at enemies, and each slot a copy
+     * of its model with frames of its own, drawn from the monster's textures.
+     */
+    void Build(CSHOT_EFFECT &from) {
+        Drop();
+
+        alloc.base = frames;
+        alloc.buffer = frames;
+        alloc.limit = frame_quads;
+        alloc.used = 0;
+
+        data = *from.effect_data;
+        data.target = kPlayerTarget;
+
+        for (int slot = 0; slot < kBorrowedSlots; slot++) {
+            effect.chara[slot] = from.template_chara;
+            effect.chara[slot].motion[0] = &effect.chara[slot].motion_type;
+            effect.chara[slot].frame = CopyFrameVu1(static_cast<CFrameVu1 *>(from.template_chara.frame), &alloc);
+        }
+
+        effect.slot_count = kBorrowedSlots;
+        effect.texture_block = from.texture_block;
+        effect.effect_data = &data;
+
+        ready = true;
+        source = &from;
+        source_data = from.effect_data;
+        unit = NowMonstorUnit;
+        floor = UserStatus->cur_floor;
+        map = selectMapNo;
+    }
+
+    /**
+     * Fires one from origin along direction for owner; false where no slot is free.
+     */
+    bool Fire(const float *origin, const float *direction, int damage, int owner) {
+        sceVu0FVECTOR position = {origin[0], origin[1], origin[2], 1.0f};
+        sceVu0FVECTOR target = {origin[0] + direction[0], origin[1] + direction[1], origin[2] + direction[2], 1.0f};
+
+        if (effect.Set(position, target, owner, -1, 0, nullptr, -1) == -1) {
+            return false;
+        }
+
+        // The shot keeps its own element and ailments; the weapon's abilities and monster
+        // bonuses ride along as on any of the character's shots.
+        effect.SetWepStatus(NowWeaponHave->flags);
+        effect.SetVsMonster(NowWeaponHave->vs_monster);
+        effect.SetDmg(damage);
+        effect.SetWait(kBorrowedHitWait);
+        return true;
+    }
+};
+
 alignas(64) u_char g_stolen_frames[1024 * 1024];
-CDataAlloc2<1>     g_stolen_alloc(-1);
-
-bool StealsShots(int owner) {
-    const int held = HeldBy(owner);
-
-    return (owner == CHARA_XIAO && held == ITEM_WEAPON_BANDIT_SLINGSHOT) ||
-           (owner == CHARA_RUBY && held == ITEM_WEAPON_BANDIT_S_RING);
-}
-
-void StolenDrop() {
-    g_stolen.Initialize();
-    g_stolen_ready = false;
-    g_stolen_source = nullptr;
-    g_stolen_source_data = nullptr;
-    g_stolen_unit = nullptr;
-}
-
-/**
- * Whether what the stolen effect was built from still stands: the same floor, the same monsters
- * and the monster's effect as it was.
- */
-bool StolenValid() {
-    if (!g_stolen_ready || UserStatus == nullptr) {
-        return false;
-    }
-
-    if (NowMonstorUnit != g_stolen_unit || UserStatus->cur_floor != g_stolen_floor || selectMapNo != g_stolen_map ||
-        g_stolen_source->effect_data != g_stolen_source_data) {
-        StolenDrop();
-        return false;
-    }
-
-    return true;
-}
+alignas(64) u_char g_breath_frames[1024 * 1024];
+BorrowedShot       g_stolen(g_stolen_frames, sizeof(g_stolen_frames));
+BorrowedShot       g_breath(g_breath_frames, sizeof(g_breath_frames));
 
 /**
  * The loaded effect a monster's projectile fires from, or null where it has none that flies.
@@ -717,37 +770,230 @@ CSHOT_EFFECT *Projectile(int entry) {
 }
 
 /**
- * Builds the stolen effect from the monster's: its description aimed at enemies, and each slot a
- * copy of its model with frames of its own, drawn from the monster's textures.
+ * The floor's loaded effect for one of the game's shot descriptions, or null when no monster on
+ * the floor fires it.
  */
-bool StolenBuild(CSHOT_EFFECT &source) {
-    StolenDrop();
-
-    g_stolen_alloc.base = g_stolen_frames;
-    g_stolen_alloc.buffer = g_stolen_frames;
-    g_stolen_alloc.limit = static_cast<int>(sizeof(g_stolen_frames) / 16);
-    g_stolen_alloc.used = 0;
-
-    g_stolen_data = *source.effect_data;
-    g_stolen_data.target = kPlayerTarget;
-
-    for (int slot = 0; slot < kStolenSlots; slot++) {
-        g_stolen.chara[slot] = source.template_chara;
-        g_stolen.chara[slot].motion[0] = &g_stolen.chara[slot].motion_type;
-        g_stolen.chara[slot].frame = CopyFrameVu1(static_cast<CFrameVu1 *>(source.template_chara.frame), &g_stolen_alloc);
+CSHOT_EFFECT *LoadedEffect(const BT_SHOT_EFFECT *description) {
+    if (NowShotEffect == nullptr || description == nullptr) {
+        return nullptr;
     }
 
-    g_stolen.slot_count = kStolenSlots;
-    g_stolen.texture_block = source.texture_block;
-    g_stolen.effect_data = &g_stolen_data;
+    for (CSHOT_EFFECT &effect : NowShotEffect->effect) {
+        if (effect.effect_data == description && effect.template_chara.frame != nullptr) {
+            return &effect;
+        }
+    }
 
-    g_stolen_ready = true;
-    g_stolen_source = &source;
-    g_stolen_source_data = source.effect_data;
-    g_stolen_unit = NowMonstorUnit;
-    g_stolen_floor = UserStatus->cur_floor;
-    g_stolen_map = selectMapNo;
-    return true;
+    return nullptr;
+}
+
+// ── Xiao and Ruby: Steal Shot ───────────────────────────────────────────────────────────────
+
+// A steal with the Bandit Slingshot or Bandit's Ring takes the victim's projectile: from then
+// until the next steal or the floor's end, Xiao's pellets and Ruby's quick shots are that shot,
+// at twice the damage.
+constexpr float kStolenDamage = 2.0f;
+
+bool StealsShots(int owner) {
+    const int held = HeldBy(owner);
+
+    return (owner == CHARA_XIAO && held == ITEM_WEAPON_BANDIT_SLINGSHOT) ||
+           (owner == CHARA_RUBY && held == ITEM_WEAPON_BANDIT_S_RING);
+}
+
+// ── Xiao: the pellets ───────────────────────────────────────────────────────────────────────
+
+// What the mod knows of each of Xiao's twelve pellet slots.
+struct Pellet {
+    bool  bounced = false;     // a ricochet, which never ricochets again
+    int   depart_from = -1;    // the monster a ricochet is still leaving, or -1
+    int   depart_steps = 0;    // steps it has spent leaving
+    float kick_back = 0.0f;    // a charged pellet's kick, from this far behind it; 0 for none
+    bool  crush = false;       // a Charging Bull pellet, which passes guards
+};
+
+std::array<Pellet, 12> g_pellets;
+
+// The charged shot: held this many steps, then released within the arm window.
+constexpr int   kChargeSteps = 60;
+constexpr int   kChargeArmSteps = 60;
+constexpr float kChargedDamage = 1.5f;
+constexpr float kKickSpeed = 2.5f;
+constexpr float kKickDecay = 0.1f;
+
+bool g_aim_holding = false;
+int  g_aim_steps = 0;
+bool g_aim_charged = false;
+int  g_charge_armed = 0;
+
+// Dragon's Breath: the Gemron shot for each element, Fire to Holy, then the Black Dragon's.
+constexpr int   kBreathShots[] = {5, 20, 23, 24, 25, 22};
+constexpr float kBreathPelletSize = 5.0f;
+constexpr float kBreathKickBack = 4.0f;
+
+// Charging Bull.
+constexpr float kBullPelletSize = 2.0f;
+constexpr float kBullKickBack = 30.0f;
+
+// Double Impact: two pellets side by side, each at three quarters of the shot's attack.
+constexpr float kTwinDamage = 0.75f;
+constexpr float kTwinWidth = 1.0f;
+
+// Ricochet.
+constexpr float kPelletRadius = 2.0f;
+constexpr float kRicochetRange = 120.0f;
+constexpr float kRicochetSpeed = 4.0f;
+constexpr int   kRicochetDepartSteps = 30;
+
+// Charging Bull hits planted this step, which pass the guard window.
+struct CrushHit {
+    int hit = -1;
+    int damage = 0;
+    int step = -1;
+};
+
+std::array<CrushHit, 12> g_crush_hits;
+
+/**
+ * Starts a pellet in the first free slot, as the game does; the slot, or -1 when none is free.
+ */
+int SpawnPellet(CSHOT *shots, const float *world, const float *vector, int damage, float size) {
+    for (int i = 0; i < 12; i++) {
+        if (shots->used[i] == 0) {
+            for (int axis = 0; axis < 3; axis++) {
+                shots->pos[i][axis] = world[axis];
+                shots->vector[i][axis] = vector[axis];
+            }
+
+            shots->pos[i][3] = 1.0f;
+            shots->vector[i][3] = 0.0f;
+            shots->life[i] = 0x78;
+            shots->damage[i] = damage;
+            shots->size[i] = size;
+            shots->halted[i] = 0;
+            shots->start_flag[i] = 0;
+            shots->used[i] = 1;
+            g_pellets[i] = {};
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+bool MonsterAlive(int m) {
+    const MONSTOR &monster = NowMonstorUnit->monster[m];
+    return monster.state != -1 && monster.revealed != 0 && monster.hp > 0;
+}
+
+float Distance(const float *a, const float *b) {
+    const float dx = a[0] - b[0];
+    const float dy = a[1] - b[1];
+    const float dz = a[2] - b[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Whether a point lies within reach of one of a monster's live hit spheres, the pellet's own
+ * collision rule.
+ */
+bool InsideMonster(int m, const float *position, float reach) {
+    const auto &effect = NowMonstorUnit->effect[m];
+
+    for (int sphere = 0; sphere < 16; sphere++) {
+        if (effect.timer[sphere] != 0 && Distance(effect.position[sphere], position) <= reach + effect.radius[sphere]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * The living monster a point lies inside, but except; -1 for none.
+ */
+int MonsterAt(const float *position, float reach, int except) {
+    if (NowMonstorUnit == nullptr) {
+        return -1;
+    }
+
+    for (int m = 0; m < 16; m++) {
+        if (m != except && MonsterAlive(m) && InsideMonster(m, position, reach)) {
+            return m;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * The living monster nearest the one at from, within range of it, and the point to aim at: its
+ * live hit sphere nearest position. -1 for none.
+ */
+int NextTarget(int from, const float *position, float *aim) {
+    sceVu0FVECTOR from_pos;
+    NowMonstorUnit->chara[from][0].GetPosition(from_pos);
+
+    int   best = -1;
+    float best_distance = kRicochetRange;
+
+    for (int m = 0; m < 16; m++) {
+        if (m == from || !MonsterAlive(m)) {
+            continue;
+        }
+
+        sceVu0FVECTOR pos;
+        NowMonstorUnit->chara[m][0].GetPosition(pos);
+        const float distance = Distance(pos, from_pos);
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = m;
+            aim[0] = pos[0];
+            aim[1] = pos[1];
+            aim[2] = pos[2];
+        }
+    }
+
+    if (best >= 0) {
+        const auto &effect = NowMonstorUnit->effect[best];
+        float       nearest = -1.0f;
+
+        for (int sphere = 0; sphere < 16; sphere++) {
+            if (effect.timer[sphere] != 0) {
+                const float distance = Distance(effect.position[sphere], position);
+
+                if (nearest < 0.0f || distance < nearest) {
+                    nearest = distance;
+                    aim[0] = effect.position[sphere][0];
+                    aim[1] = effect.position[sphere][1];
+                    aim[2] = effect.position[sphere][2];
+                }
+            }
+        }
+    }
+
+    return best;
+}
+
+/**
+ * Dragon's Breath: the element's Gemron shot, when a monster on the floor has it loaded.
+ */
+bool BreathFire(const float *world, const float *vector, int damage) {
+    const int element = std::clamp<int>(NowWeaponHave->best_elem, 0, 5);
+    const BT_SHOT_EFFECT *wanted = BtEntryEffectTbl[kBreathShots[element]];
+
+    if (!g_breath.Valid() || g_breath.source_data != wanted) {
+        CSHOT_EFFECT *loaded = LoadedEffect(wanted);
+
+        if (loaded == nullptr) {
+            return false;
+        }
+
+        g_breath.Build(*loaded);
+    }
+
+    return g_breath.Fire(world, vector, damage, CHARA_XIAO);
 }
 
 // ── Ruby: Mobius Ring ───────────────────────────────────────────────────────────────────────
@@ -1289,9 +1535,20 @@ bool PerfectGuard() {
     return ToanWeapon() == ITEM_WEAPON_7THHEAVEN;
 }
 
-bool PassesGuard(int hit_owner) {
+bool PassesGuard(int hit_owner, int hit) {
     // Guard Crush: Toan's hits connect even while an enemy blocks.
-    return hit_owner == CHARA_TOAN && GuardCrush(ToanWeapon());
+    if (hit_owner == CHARA_TOAN && GuardCrush(ToanWeapon())) {
+        return true;
+    }
+
+    // Charging Bull: a charged Matador pellet's hit, planted this step or the last.
+    for (const CrushHit &crush : g_crush_hits) {
+        if (crush.hit == hit && crush.step >= g_step_count - 1 && NowColData->hit[hit].damage == crush.damage) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool PassesInvincibility(const MONSTOR &monster) {
@@ -1455,6 +1712,12 @@ void OnKill(const MONSTOR & /*monster*/, WEAPON_HAVE *weapon, float *position) {
         return;
     }
 
+    // Shooting Stars: one kill in fifty drops an empty SynthSphere.
+    if (weapon->item_no == ITEM_WEAPON_STAR_BREAKER && std::rand() % 50 == 0) {
+        RandomItem->Set(position, 1, -1, ITEM_ATTACH_SYNTHESIS_SPHERE);
+        ShowDungeonMessage("The Star Breaker sent\nyou a shooting star!", 3 * kStepsPerSecond);
+    }
+
     // Solar Harvest: one kill in a hundred drops a Sun attachment.
     if (SolarHarvest(weapon->item_no) && std::rand() % 100 == 0) {
         RandomItem->Set(position, 1, -1, ITEM_ATTACH_SUN);
@@ -1582,44 +1845,229 @@ void OnSteal(const MONSTOR &monster, int owner) {
         source = Projectile(monster.shot_effect2);
     }
 
-    if (source == nullptr || !StolenBuild(*source)) {
+    if (source == nullptr) {
         return;
     }
 
+    g_stolen.Build(*source);
     ShowDungeonMessage("Projectile stolen! Your shots\nare its shots on this floor.", 4 * kStepsPerSecond);
 }
 
 bool FireStolenShot(const float *origin, const float *direction, int damage, int owner) {
-    if (!StealsShots(owner) || !StolenValid()) {
+    if (!StealsShots(owner) || !g_stolen.Valid()) {
         return false;
     }
 
-    sceVu0FVECTOR position = {origin[0], origin[1], origin[2], 1.0f};
-    sceVu0FVECTOR target = {origin[0] + direction[0], origin[1] + direction[1], origin[2] + direction[2], 1.0f};
-
-    // No free slot: the shot goes as it would.
-    if (g_stolen.Set(position, target, owner, -1, 0, nullptr, -1) == -1) {
-        return false;
-    }
-
-    // The shot keeps its own element and ailments; the weapon's abilities and monster bonuses
-    // ride along as on any of the character's shots.
-    g_stolen.SetWepStatus(NowWeaponHave->flags);
-    g_stolen.SetVsMonster(NowWeaponHave->vs_monster);
-    g_stolen.SetDmg(static_cast<int>(static_cast<float>(damage) * kStolenDamage));
-    g_stolen.SetWait(kStolenHitWait);
-    return true;
+    return g_stolen.Fire(origin, direction, static_cast<int>(static_cast<float>(damage) * kStolenDamage), owner);
 }
 
 void StolenShotStep() {
-    if (StolenValid()) {
-        g_stolen.Step();
+    for (BorrowedShot *shot : {&g_stolen, &g_breath}) {
+        if (shot->Valid()) {
+            shot->effect.Step();
+        }
     }
 }
 
 void StolenShotDraw() {
-    if (StolenValid()) {
-        g_stolen.Draw();
+    for (BorrowedShot *shot : {&g_stolen, &g_breath}) {
+        if (shot->Valid()) {
+            shot->effect.Draw();
+        }
+    }
+}
+
+bool XiaoAimStep(bool holding) {
+    const int  held = HeldBy(CHARA_XIAO);
+    const bool charges = held == ITEM_WEAPON_MATADOR || held == ITEM_WEAPON_DRAGON_S_Y;
+    bool       full = false;
+
+    if (holding && charges) {
+        if (!g_aim_holding) {
+            g_aim_holding = true;
+            g_aim_steps = 0;
+            g_aim_charged = false;
+        }
+
+        if (++g_aim_steps >= kChargeSteps && !g_aim_charged) {
+            g_aim_charged = true;
+            full = true;
+        }
+    } else if (g_aim_holding) {
+        g_aim_holding = false;
+        g_charge_armed = g_aim_charged ? kChargeArmSteps : 0;
+        g_aim_charged = false;
+    } else if (g_charge_armed > 0) {
+        g_charge_armed--;
+    }
+
+    return full;
+}
+
+bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage) {
+    if (FireStolenShot(world, vector, damage, CHARA_XIAO)) {
+        return true;
+    }
+
+    const int  held = HeldBy(CHARA_XIAO);
+    const bool charged = g_charge_armed > 0;
+    g_charge_armed = 0;
+
+    const int strong = static_cast<int>(static_cast<float>(damage) * kChargedDamage);
+
+    // Dragon's Breath: a charged shot is the element's Gemron ball, or where no monster on the
+    // floor fires one, the pellet grown five times; either at 1.5 times the damage.
+    if (charged && held == ITEM_WEAPON_DRAGON_S_Y) {
+        if (BreathFire(world, vector, strong)) {
+            return true;
+        }
+
+        const int slot = SpawnPellet(shots, world, vector, strong, kBreathPelletSize);
+
+        if (slot >= 0) {
+            g_pellets[slot].kick_back = kBreathKickBack;
+        }
+
+        return true;
+    }
+
+    // Charging Bull: a charged shot at 1.5 times the damage that passes guards and shoves the
+    // enemy along its flight.
+    if (charged && held == ITEM_WEAPON_MATADOR) {
+        const int slot = SpawnPellet(shots, world, vector, strong, kBullPelletSize);
+
+        if (slot >= 0) {
+            g_pellets[slot].kick_back = kBullKickBack;
+            g_pellets[slot].crush = true;
+        }
+
+        return true;
+    }
+
+    // Double Impact: two pellets side by side across the flight line.
+    if (held == ITEM_WEAPON_DOUBLE_IMPACT) {
+        const int twin = std::max(1, static_cast<int>(std::lround(static_cast<float>(damage) * kTwinDamage)));
+        const float ground = std::sqrt(vector[0] * vector[0] + vector[2] * vector[2]);
+        const float side_x = ground > 1e-3f ? vector[2] / ground : 1.0f;
+        const float side_z = ground > 1e-3f ? -vector[0] / ground : 0.0f;
+        const float half = kTwinWidth / 2.0f;
+
+        for (const float sign : {-1.0f, 1.0f}) {
+            const float at[3] = {world[0] + sign * side_x * half, world[1], world[2] + sign * side_z * half};
+            SpawnPellet(shots, at, vector, twin, 1.0f);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
+void OnPelletSpawned(int slot) {
+    if (slot >= 0 && slot < 12) {
+        g_pellets[slot] = {};
+    }
+}
+
+bool PelletDeparts(CSHOT *shots, int slot) {
+    Pellet &pellet = g_pellets[slot];
+
+    if (pellet.depart_from < 0 || NowMonstorUnit == nullptr) {
+        return false;
+    }
+
+    // A ricochet is stepped clear of the monster it left before it can hit again, so it
+    // cannot strike that one twice; reaching another hands it back to the game at once.
+    float *pos = shots->pos[slot];
+    float *vec = shots->vector[slot];
+
+    pos[0] += vec[0];
+    pos[1] += vec[1];
+    pos[2] += vec[2];
+
+    const float speed = std::sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+    const bool  clear = !InsideMonster(pellet.depart_from, pos, kPelletRadius + speed) ||
+                       ++pellet.depart_steps >= kRicochetDepartSteps;
+    const bool  other = MonsterAt(pos, kPelletRadius, pellet.depart_from) >= 0;
+
+    if (clear || other) {
+        pellet.depart_from = -1;
+    }
+
+    return true;
+}
+
+void OnPelletHit(CSHOT *shots, int slot, bool monster) {
+    const Pellet pellet = g_pellets[slot];
+    const float *pos = shots->pos[slot];
+    const float *vec = shots->vector[slot];
+
+    // The charged pellets' kick, from a point behind the pellet so the shove follows its flight.
+    if (pellet.kick_back > 0.0f) {
+        const float ground = std::sqrt(vec[0] * vec[0] + vec[2] * vec[2]);
+        float       origin[4] = {pos[0], pos[1], pos[2], 1.0f};
+
+        if (ground > 1e-3f) {
+            origin[0] -= vec[0] / ground * pellet.kick_back;
+            origin[2] -= vec[2] / ground * pellet.kick_back;
+        }
+
+        NowColData->SetKickBack(origin, kKickSpeed, kKickDecay, 2);
+    }
+
+    if (pellet.crush) {
+        g_crush_hits[slot] = {NowColData->now_hit, shots->damage[slot], g_step_count};
+    }
+
+    // Ricochet: the Hardshooter's pellets, and Double Impact's, send a second pellet on from
+    // the monster they hit at the nearest other one within reach, or anywhere when none is.
+    const int held = HeldBy(CHARA_XIAO);
+
+    if (!monster || pellet.bounced || NowMonstorUnit == nullptr ||
+        (held != ITEM_WEAPON_HARDSHOOTER && held != ITEM_WEAPON_DOUBLE_IMPACT)) {
+        return;
+    }
+
+    const int hit = MonsterAt(pos, kPelletRadius, -1);
+
+    if (hit < 0) {
+        return;
+    }
+
+    float aim[3];
+    float dx;
+    float dz;
+
+    if (NextTarget(hit, pos, aim) >= 0) {
+        dx = aim[0] - pos[0];
+        dz = aim[2] - pos[2];
+    } else {
+        const float angle = static_cast<float>(std::rand()) / RAND_MAX * 6.2831853f;
+        dx = std::cos(angle);
+        dz = std::sin(angle);
+    }
+
+    float length = std::sqrt(dx * dx + dz * dz);
+
+    if (length < 1e-3f) {
+        dx = 1.0f;
+        dz = 0.0f;
+        length = 1.0f;
+    }
+
+    float speed = std::sqrt(vec[0] * vec[0] + vec[2] * vec[2]);
+
+    if (speed < 0.5f) {
+        speed = kRicochetSpeed;
+    }
+
+    const float start[3] = {pos[0], pos[1], pos[2]};
+    const float along[3] = {dx / length * speed, 0.0f, dz / length * speed};
+    const int   bounce = SpawnPellet(shots, start, along, shots->damage[slot], 1.0f);
+
+    if (bounce >= 0) {
+        g_pellets[bounce].bounced = true;
+        g_pellets[bounce].depart_from = hit;
     }
 }
 
@@ -1686,7 +2134,12 @@ void OnFloorStart() {
     g_blade = {};
     g_stride_held = false;
     TunaReset();
-    StolenDrop();
+    g_stolen.Drop();
+    g_breath.Drop();
+    g_pellets = {};
+    g_crush_hits = {};
+    g_aim_holding = false;
+    g_charge_armed = 0;
     g_mobius_mult = 1.0f;
     g_mobius_steps = 0;
     g_mobius_effect = nullptr;
