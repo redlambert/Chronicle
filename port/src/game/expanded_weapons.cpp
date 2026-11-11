@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <string>
+#include <vector>
 
 #include "btactstatus.hpp"
 #include "character.hpp"
@@ -19,6 +21,7 @@
 #include "frame.hpp"
 #include "gameutil.hpp"
 #include "menu_inventory.hpp"
+#include "menuetc.hpp"
 #include "monstorunit.hpp"
 #include "randomitem.hpp"
 #include "savedata.hpp"
@@ -47,6 +50,68 @@ text::GameTextFile &Messages() {
 }
 
 int g_next_message = kMessageBase;
+
+// ── Menu descriptions ───────────────────────────────────────────────────────────────────────
+
+/**
+ * A weapon's new description, as it reads in the menus.
+ */
+struct WeaponDescription {
+    int         item_no;
+    const char *text;
+};
+
+constexpr WeaponDescription kDescriptions[] = {
+    {ITEM_WEAPON_BASELARD, "Heavy Hand: slower,\nweightier swings."},
+    {ITEM_WEAPON_GLADIUS, "Jacket Hunter: Master\nJackets give 4x ABS."},
+    {ITEM_WEAPON_WISE_OWL_SWORD, "In Wise Owl Forest,\nwarns you when a key\nmonster is near."},
+    {ITEM_WEAPON_CRYSKNIFE, "Thrown gems do 2x.\nOwned: magic circles\nwork twice as hard."},
+    {ITEM_WEAPON_BUSTER_SWORD, "Buster Boost: makes\nAnti attachments\nstronger."},
+    {ITEM_WEAPON_KITCHEN_KNIFE, "Enter a spring: bigger\nblade, 2x attack and\nfull WHP for 60 sec."},
+    {ITEM_WEAPON_TSUKIKAGE, "Quick first swing.\nMoonlit Focus: charge\nattacks fill faster."},
+    {ITEM_WEAPON_SUN_SWORD, "Solar Harvest: rare\nchance an enemy drops\na Sun."},
+    {ITEM_WEAPON_MACHO_SWORD, "Owned: every weapon\nabsorbs ABS to 2x max.\nExtra carries over."},
+    {ITEM_WEAPON_SHAMSHIR, "Swift Strikes:\na faster combo."},
+    {ITEM_WEAPON_DARK_CLOUD, "Guard Crush: cuts\nthrough any enemy's\nguard."},
+    {ITEM_WEAPON_BRAVE_ARK, "Blocks Freeze, Poison,\nCurse and Goo. Hits\nmimics at any time."},
+    {ITEM_WEAPON_AGA_S_SWORD, "Defensive Legacy:\n+15 defense."},
+    {ITEM_WEAPON_EVILCISE, "Cursed each floor; no\nother ailments stick.\nCleansed: 1 HP, poison."},
+    {ITEM_WEAPON_SMALL_SWORD, "Quick Draw: the first\nswing comes out fast."},
+    {ITEM_WEAPON_CLAYMORE, "Greatsword: huge blade\nwith long reach. Slow,\nheavy swings."},
+    {ITEM_WEAPON_MANEATER, "Cursed each floor. Low\nWHP: trades 1 HP for\n1 WHP each second."},
+    {ITEM_WEAPON_BONE_RAPIER, "Gravedigger: undead\nyou slay stay down."},
+    {ITEM_WEAPON_SAX, "Fine Fare: small\nchests hold better\nitems."},
+    {ITEM_WEAPON_7BRANCH_SWORD, "Breaks only at +7 or\nmore, into a sphere\nwith 77% of stats."},
+    {ITEM_WEAPON_DUSACK, "Faster combo, better\nchests. Hits mimics\nat any time."},
+    {ITEM_WEAPON_CROSS_HINDER, "Sanctifier: 2x damage\nand ABS vs undead,\nwho stay down."},
+    {ITEM_WEAPON_7THHEAVEN, "Holy sword. Guarding\nblocks all attacks;\ncuts through guards."},
+};
+
+/**
+ * A rewritten description entry, and the bank it was built from.
+ */
+struct BuiltDescription {
+    const short     *buff = nullptr;
+    std::vector<s16> codes;
+};
+
+std::map<int, BuiltDescription> g_descriptions;
+
+/**
+ * A message's text in a bank laid out as ClsMes::SetBuff reads one; null where it has none.
+ */
+const short *BankMessage(const short *buff, int line) {
+    const int    count = buff[0];
+    const short *body = &buff[1];
+
+    for (int i = 0; i < count; i++) {
+        if (line == body[i * 2 + 1]) {
+            return &body[count] + body[i * 2 + 2];
+        }
+    }
+
+    return nullptr;
+}
 
 // ── Blade sizes ─────────────────────────────────────────────────────────────────────────────
 
@@ -674,6 +739,67 @@ int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon) {
     }
 
     return exp;
+}
+
+short *MenuDescription(const ClsMes *mes, const short *buff, int line) {
+    // The menus' item help windows: the weapon menu's and the shops'.
+    if ((mes != &CommonMenuMes2 && mes != &CommonMenuMes3) || buff == nullptr) {
+        return nullptr;
+    }
+
+    // A weapon's description entry is its message number plus 500.
+    constexpr int kDescriptionOffset = 500;
+
+    const WeaponDescription *description = nullptr;
+
+    for (const WeaponDescription &entry : kDescriptions) {
+        if (GetCommonItemDataMsg(entry.item_no) + kDescriptionOffset == line) {
+            description = &entry;
+            break;
+        }
+    }
+
+    if (description == nullptr) {
+        return nullptr;
+    }
+
+    BuiltDescription &built = g_descriptions[line];
+
+    if (built.buff != buff) {
+        built = {};
+
+        const short *vanilla = BankMessage(buff, line);
+
+        if (vanilla == nullptr) {
+            return nullptr;
+        }
+
+        // Keep the entry's leading line breaks and its name line, as the window lays them out.
+        constexpr int kNameLineMax = 64;
+
+        int at = 0;
+
+        while (vanilla[at] == MES_CODE_NEWLINE) {
+            at++;
+        }
+
+        while (at < kNameLineMax && vanilla[at] != MES_CODE_NEWLINE && vanilla[at] != MES_CODE_END) {
+            at++;
+        }
+
+        if (vanilla[at] != MES_CODE_NEWLINE) {
+            return nullptr;
+        }
+
+        built.codes.assign(vanilla, vanilla + at + 1);
+
+        std::vector<s16> text;
+        text::GameTextEncode(description->text, text);
+        built.codes.insert(built.codes.end(), text.begin(), text.end());
+        built.buff = buff;
+    }
+
+    return built.codes.empty() ? nullptr : reinterpret_cast<short *>(built.codes.data());
 }
 
 int CircleMultiplier() {

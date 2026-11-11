@@ -12,6 +12,7 @@
 namespace dc::game {
 
 class CCollisionData;
+class ClsMes;
 struct MONSTOR;
 
 namespace expanded {
@@ -129,6 +130,13 @@ bool PassesInvincibility(const MONSTOR &monster);
  * The ABS a kill gives the weapon, after retail's own; also any kill drop the weapon adds.
  */
 int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon);
+
+/**
+ * A weapon's description in the menus, rewritten to say what its effects do: the vanilla
+ * entry's name line, then the new text. Null where the window, the line or the weapon has no
+ * new text, so the bank's own entry is read.
+ */
+short *MenuDescription(const ClsMes *mes, const short *buff, int line);
 
 /**
  * Circle Amplifier: how many times over every magic circle works. 1, or 2 while a Crysknife

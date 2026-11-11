@@ -1,4 +1,5 @@
 #include "clsmes.hpp"
+#include "expanded_weapons.hpp"
 #include "mathconst.h"
 
 #include <libpkt.h>
@@ -1064,6 +1065,11 @@ short *ClsMes::GetTextLineDataTop(int line) {
         if (short *text = FindMessage(g_overlay_file, line)) {
             return text;
         }
+    }
+
+    // Dark Cloud Expanded: weapon descriptions that say what the new effects do.
+    if (short *text = expanded::MenuDescription(this, this->buff, line)) {
+        return text;
     }
 
     return FindMessage(this->buff, line);
