@@ -62,7 +62,7 @@ struct WeaponDescription {
 };
 
 constexpr WeaponDescription kDescriptions[] = {
-    {ITEM_WEAPON_BASELARD, "Heavy Hand: slower,\nweightier swings."},
+    {ITEM_WEAPON_BASELARD, "Heavy Hand: every hit\nknocks enemies far\nback."},
     {ITEM_WEAPON_GLADIUS, "Jacket Hunter: Master\nJackets give 4x ABS."},
     {ITEM_WEAPON_WISE_OWL_SWORD, "In Wise Owl Forest,\nwarns you when a key\nmonster is near."},
     {ITEM_WEAPON_CRYSKNIFE, "Thrown gems do 2x.\nOwned: magic circles\nwork twice as hard."},
@@ -77,7 +77,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_AGA_S_SWORD, "Defensive Legacy:\n+15 defense."},
     {ITEM_WEAPON_EVILCISE, "Cursed each floor; no\nother ailments stick.\nCleansed: 1 HP, poison."},
     {ITEM_WEAPON_SMALL_SWORD, "Quick Draw: the first\nswing comes out fast."},
-    {ITEM_WEAPON_CLAYMORE, "Greatsword: huge blade\nwith long reach. Slow,\nheavy swings."},
+    {ITEM_WEAPON_CLAYMORE, "Greatsword: huge blade\nwith long reach. Hits\nknock enemies back."},
     {ITEM_WEAPON_MANEATER, "Cursed each floor. Low\nWHP: trades 1 HP for\n1 WHP each second."},
     {ITEM_WEAPON_BONE_RAPIER, "Gravedigger: undead\nyou slay stay down."},
     {ITEM_WEAPON_SAX, "Fine Fare: small\nchests hold better\nitems."},
