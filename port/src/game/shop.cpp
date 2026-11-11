@@ -3640,6 +3640,9 @@ void ItemShopMemoryAlloc() {
     ShopListPt = reinterpret_cast<SHOP_ITEMLIST *>(ShopCashBuffer.Alloc(0x1D88));
     memset(ShopListPt, 0, 0x1D88);
     ShopWorkBuf = reinterpret_cast<SHOP_ITEMLIST *>(ShopCashBuffer.Alloc(0x1D88));
+    // Dark Cloud Expanded: retail leaves the work buffer holding whatever the menu buffer last held,
+    // and a shop slot copied from it could hand over a broken dagger attachment. Clear it as the list is.
+    memset(ShopWorkBuf, 0, 0x1D88);
 }
 
 void ItemPosInfoInit() {
