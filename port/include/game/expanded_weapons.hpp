@@ -332,6 +332,12 @@ bool WhirlwindUnlocked();
 void UngagaStrike(const float *tip);
 
 /**
+ * A script asks for an item from usable (ended by -1): the floor's key, when Skeleton Key opens
+ * its locked door without one, or -1 to let the item window open as it would.
+ */
+int SkeletonKey(const int *usable);
+
+/**
  * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid
  * through the game's own wear on the next walking step, if that weapon is still in hand.
  */

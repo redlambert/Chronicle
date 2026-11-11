@@ -88,7 +88,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SMALL_SWORD, "Quick Draw: the first\nswing comes out fast."},
     {ITEM_WEAPON_CLAYMORE, "Greatsword: huge blade\nwith long reach. Hits\nknock enemies back."},
     {ITEM_WEAPON_MANEATER, "Cursed each floor. Low\nWHP: trades 1 HP for\n1 WHP each second."},
-    {ITEM_WEAPON_BONE_RAPIER, "Gravedigger: undead\nyou slay stay down."},
+    {ITEM_WEAPON_BONE_RAPIER, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_SAX, "Fine Fare: small\nchests hold better\nitems."},
     {ITEM_WEAPON_7BRANCH_SWORD, "Breaks only at +7 or\nmore, into a sphere\nwith 77% of stats."},
     {ITEM_WEAPON_DUSACK, "Faster combo, better\nchests. Hits mimics\nat any time."},
@@ -122,6 +122,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
     {ITEM_WEAPON_SWORD_OF_ZEUS, "Guard 1.5 sec; swings\ncall lightning. A long\ncharge: a lunge bolt."},
     {ITEM_WEAPON_HERCULES_WRATH, "Guard 5 sec: the next\nswing calls a blast\nthrough any guard."},
+    {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -2833,6 +2834,32 @@ void UngagaStrike(const float *tip) {
     PlantBlast(tip, 1.0f, true, -1, kHerculesReach);
     DrainWhp(ITEM_WEAPON_HERCULES_WRATH, kHerculesWhp);
     setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+}
+
+int SkeletonKey(const int *usable) {
+    // Skeleton Key: with the Bone Rapier or the Bone Slingshot out, the floor's locked door opens
+    // without its key, and the key it would take stays where it is.
+    if (usable == nullptr || UserStatus == nullptr) {
+        return -1;
+    }
+
+    const int chara = UserStatus->cur_chara;
+    const int held = HeldBy(chara);
+
+    if (!(chara == CHARA_TOAN && held == ITEM_WEAPON_BONE_RAPIER) && !(chara == CHARA_XIAO && held == ITEM_WEAPON_BONE_SLINGSHOT)) {
+        return -1;
+    }
+
+    const int key = ITEM_BONE_KEY + selectMapNo;
+
+    for (int i = 0; i < 16 && usable[i] != -1; i++) {
+        if (usable[i] == key) {
+            ShowDungeonMessage("You can hear an ominous voice\nlaughing 'Rattle me bones!'", 4 * kStepsPerSecond);
+            return key;
+        }
+    }
+
+    return -1;
 }
 
 void DrainWhp(int item_no, float base_whp) {

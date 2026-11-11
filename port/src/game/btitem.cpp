@@ -927,6 +927,13 @@ int BtMiniItemSelect_Loop() {
             driveStepHold = 0;
             miniItemSelNo = -1;
 
+            // Dark Cloud Expanded: Skeleton Key answers the floor's locked door with its key.
+            if (const int key = expanded::SkeletonKey(BtEventInfo.item_select_list); key >= 0) {
+                miniItemSelNo = key;
+                BtMiniItemSelect_Sled++;
+                break;
+            }
+
             ITEM_PACK *pack = &UserStatus->item_pack;
 
             InitEventItemSelect(0x18, BtEventInfo.item_select_list, pack, 0xB4, 0xD2, BtEventInfo.item_select_filtered, 0);
