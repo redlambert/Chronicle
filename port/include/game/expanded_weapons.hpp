@@ -327,6 +327,11 @@ void OnToanWhirl(CSHOT_EFFECT *effect, int slot);
 bool WhirlwindUnlocked();
 
 /**
+ * Ungaga's first combo swing is hitting, its spear tip at tip: Hercules' Wrath's primed strike.
+ */
+void UngagaStrike(const float *tip);
+
+/**
  * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid
  * through the game's own wear on the next walking step, if that weapon is still in hand.
  */

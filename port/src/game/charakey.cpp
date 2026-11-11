@@ -655,6 +655,9 @@ void UngagaKey_Play() {
     }
 
     if (time >= 674 && time <= 677) {
+        // Dark Cloud Expanded: Hercules' Wrath lands its primed strike at the spear tip.
+        expanded::UngagaStrike(hit_left);
+
         NowColData->Set(hit_left, damage, 1, 6.0f, 0, 2, 2, 0, 0);
         basic_damage(0, 4);
         NowColData->SetKickBack(chara_pos, 1.2f, 0.1f, 2);

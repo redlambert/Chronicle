@@ -121,6 +121,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
     {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
     {ITEM_WEAPON_SWORD_OF_ZEUS, "Guard 1.5 sec; swings\ncall lightning. A long\ncharge: a lunge bolt."},
+    {ITEM_WEAPON_HERCULES_WRATH, "Guard 5 sec: the next\nswing calls a blast\nthrough any guard."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -481,7 +482,7 @@ struct BlastCrush {
 std::array<BlastCrush, 16> g_blast_crush;
 int                        g_blast_crush_next = 0;
 
-int PlantBlast(const float *at, float damage_scale, bool guard_break, int no_kick = -1) {
+int PlantBlast(const float *at, float damage_scale, bool guard_break, int no_kick = -1, float reach_scale = 1.0f) {
     if (NowMonstorUnit == nullptr || NowWeaponHave == nullptr) {
         return 0;
     }
@@ -522,7 +523,7 @@ int PlantBlast(const float *at, float damage_scale, bool guard_break, int no_kic
         float times = 0.0f;
 
         for (const BlastStep &step : kBlastSteps) {
-            if (edge <= step.radius) {
+            if (edge <= step.radius * reach_scale) {
                 times = step.times;
             }
         }
@@ -733,7 +734,7 @@ void SolarBlind() {
         hit.vs_monster = NowWeaponHave->vs_monster;
         hit.weapon_flags = NowWeaponHave->flags;
         hit.flags = GetWeaponElementAttr(NowWeaponHave->best_elem);
-        hit.owner = CHARA_TOAN;
+        hit.owner = UserStatus->cur_chara;
         hit.attack_no = 0;
         NowColData->SetKickBack(CharaMain.pos, kSolarKickSpeed, kSolarKickDecay, 2);
 
@@ -879,6 +880,58 @@ void ZeusStep(int held) {
     g_zeus_lunging = false;
     g_zeus_charged = false;
     g_zeus_charge_steps = 0;
+}
+
+// ── Hercules' Wrath "Air Strike" ────────────────────────────────────────────────────────────
+
+// The guard's second level: held a quarter second (the Mirage's decoy, its first) and five more,
+// it primes, with the charge flash on Ungaga, for as long as Hercules' decoy would stand. The
+// next swing's hit lands Big Bang's blast at the spear tip at twice the reach, through any
+// guard, for 20 WHP.
+constexpr int   kHerculesFirstSteps = 15;
+constexpr int   kHerculesChargeSteps = 5 * kStepsPerSecond;
+constexpr int   kHerculesPrimedSteps = 18 * kStepsPerSecond;
+constexpr float kHerculesReach = 2.0f;
+constexpr float kHerculesWhp = 20.0f;
+
+enum class Wrath { Idle, Charging, Primed };
+
+Wrath g_wrath = Wrath::Idle;
+int   g_wrath_steps = 0;
+
+void HerculesStep(int held) {
+    if (held != ITEM_WEAPON_HERCULES_WRATH) {
+        g_wrath = Wrath::Idle;
+        return;
+    }
+
+    const bool guarding = BtActStatus.guard_mode == kGuarding;
+
+    switch (g_wrath) {
+        case Wrath::Idle:
+            if (guarding) {
+                g_wrath = Wrath::Charging;
+                g_wrath_steps = 0;
+            }
+
+            break;
+        case Wrath::Charging:
+            if (!guarding) {
+                g_wrath = Wrath::Idle;
+            } else if (++g_wrath_steps >= kHerculesFirstSteps + kHerculesChargeSteps) {
+                g_wrath = Wrath::Primed;
+                g_wrath_steps = 0;
+                setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
+            }
+
+            break;
+        case Wrath::Primed:
+            if (++g_wrath_steps >= kHerculesPrimedSteps) {
+                g_wrath = Wrath::Idle;
+            }
+
+            break;
+    }
 }
 
 // ── Heaven's Cloud "Typhoon" ────────────────────────────────────────────────────────────────
@@ -2080,6 +2133,7 @@ void DungeonStep() {
     TyphoonStep(held);
     SolarStep(held);
     ZeusStep(held);
+    HerculesStep(HeldBy(CHARA_UNGAGA));
     BladeStep(held);
     WiseOwlStep();
     WhpStep();
@@ -2770,6 +2824,17 @@ bool WhirlwindUnlocked() {
     return UserStatus->skill_owned[0] != 0 && ToanWeapon() != ITEM_WEAPON_SWORD_OF_ZEUS;
 }
 
+void UngagaStrike(const float *tip) {
+    if (g_wrath != Wrath::Primed || HeldBy(CHARA_UNGAGA) != ITEM_WEAPON_HERCULES_WRATH) {
+        return;
+    }
+
+    g_wrath = Wrath::Idle;
+    PlantBlast(tip, 1.0f, true, -1, kHerculesReach);
+    DrainWhp(ITEM_WEAPON_HERCULES_WRATH, kHerculesWhp);
+    setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+}
+
 void DrainWhp(int item_no, float base_whp) {
     if (NowWeaponHave == nullptr || NowWeaponHave->item_no != item_no || base_whp <= 0.0f) {
         return;
@@ -2908,6 +2973,7 @@ void OnFloorStart() {
     g_zeus_charged = false;
     g_zeus_lunging = false;
     g_zeus_charge_steps = 0;
+    g_wrath = Wrath::Idle;
     g_whp_bill = 0.0f;
     g_whp_item = -1;
 }
