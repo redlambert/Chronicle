@@ -19,12 +19,15 @@
 #include "dngstatusdata.hpp"
 #include "dun/gameloop.hpp"
 #include "frame.hpp"
+#include "framevu1.hpp"
 #include "gameutil.hpp"
 #include "menu_inventory.hpp"
+#include "mds.hpp"
 #include "menuetc.hpp"
 #include "monstorunit.hpp"
 #include "randomitem.hpp"
 #include "savedata.hpp"
+#include "shot_effect_pack.hpp"
 #include "shot_effect.hpp"
 #include "shot_freefuncs.hpp"
 #include "stockitem.hpp"
@@ -99,6 +102,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_DRAGON_S_Y, "Locks on from twice\nas far, and moves\nfaster when locked on."},
     {ITEM_WEAPON_HALBERT, "Tornado: its charge\nshot flies faster\nand hits wider."},
     {ITEM_WEAPON_TALL_HAMMER, "Each hit shrinks the\nenemy, down to 30%\nof its size."},
+    {ITEM_WEAPON_BANDIT_SLINGSHOT, "Steal Shot: a steal\ntakes the enemy's\nshot, at 2x damage."},
+    {ITEM_WEAPON_BANDIT_S_RING, "Steal Shot: a steal\nmakes quick shots the\nenemy's, at 2x damage."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -622,6 +627,125 @@ void TunaStep() {
 
     g_tuna_last_whp = whp;
     g_tuna_last_hp = UserStatus->hp[CHARA_GORO];
+}
+
+// ── Xiao and Ruby: Steal Shot ───────────────────────────────────────────────────────────────
+
+// A steal with the Bandit Slingshot or Bandit's Ring takes the victim's projectile: from then
+// until the next steal or the floor's end, Xiao's pellets and Ruby's quick shots are that shot,
+// at twice the damage. The shot is the monster's own, already loaded for the floor, copied into
+// an effect of the mod's own that hits enemies instead of the party.
+constexpr float kStolenDamage = 2.0f;
+constexpr int   kStolenSlots = 6;
+constexpr int   kStolenHitWait = 45;
+constexpr int   kPlayerTarget = 2;
+
+// Self-destructs, where the monster bursts where it stands: nothing that flies to take.
+constexpr int kSelfBursts[] = {16, 17, 18};
+
+CSHOT_EFFECT   g_stolen;
+BT_SHOT_EFFECT g_stolen_data = {};
+bool           g_stolen_ready = false;
+
+// What the stolen effect was built from, to drop it once any of it is gone.
+const CSHOT_EFFECT   *g_stolen_source = nullptr;
+const BT_SHOT_EFFECT *g_stolen_source_data = nullptr;
+CMonstorUnit         *g_stolen_unit = nullptr;
+int                   g_stolen_floor = -1;
+int                   g_stolen_map = -1;
+
+// The slots' own copies of the model's frames.
+alignas(64) u_char g_stolen_frames[1024 * 1024];
+CDataAlloc2<1>     g_stolen_alloc(-1);
+
+bool StealsShots(int owner) {
+    const int held = HeldBy(owner);
+
+    return (owner == CHARA_XIAO && held == ITEM_WEAPON_BANDIT_SLINGSHOT) ||
+           (owner == CHARA_RUBY && held == ITEM_WEAPON_BANDIT_S_RING);
+}
+
+void StolenDrop() {
+    g_stolen.Initialize();
+    g_stolen_ready = false;
+    g_stolen_source = nullptr;
+    g_stolen_source_data = nullptr;
+    g_stolen_unit = nullptr;
+}
+
+/**
+ * Whether what the stolen effect was built from still stands: the same floor, the same monsters
+ * and the monster's effect as it was.
+ */
+bool StolenValid() {
+    if (!g_stolen_ready || UserStatus == nullptr) {
+        return false;
+    }
+
+    if (NowMonstorUnit != g_stolen_unit || UserStatus->cur_floor != g_stolen_floor || selectMapNo != g_stolen_map ||
+        g_stolen_source->effect_data != g_stolen_source_data) {
+        StolenDrop();
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * The loaded effect a monster's projectile fires from, or null where it has none that flies.
+ */
+CSHOT_EFFECT *Projectile(int entry) {
+    if (NowShotEffect == nullptr || entry < 0 || entry >= 5) {
+        return nullptr;
+    }
+
+    CSHOT_EFFECT &effect = NowShotEffect->effect[entry];
+
+    if (effect.effect_data == nullptr || effect.template_chara.frame == nullptr) {
+        return nullptr;
+    }
+
+    for (const int burst : kSelfBursts) {
+        if (effect.effect_data == BtEntryEffectTbl[burst]) {
+            return nullptr;
+        }
+    }
+
+    return &effect;
+}
+
+/**
+ * Builds the stolen effect from the monster's: its description aimed at enemies, and each slot a
+ * copy of its model with frames of its own, drawn from the monster's textures.
+ */
+bool StolenBuild(CSHOT_EFFECT &source) {
+    StolenDrop();
+
+    g_stolen_alloc.base = g_stolen_frames;
+    g_stolen_alloc.buffer = g_stolen_frames;
+    g_stolen_alloc.limit = static_cast<int>(sizeof(g_stolen_frames) / 16);
+    g_stolen_alloc.used = 0;
+
+    g_stolen_data = *source.effect_data;
+    g_stolen_data.target = kPlayerTarget;
+
+    for (int slot = 0; slot < kStolenSlots; slot++) {
+        g_stolen.chara[slot] = source.template_chara;
+        g_stolen.chara[slot].motion[0] = &g_stolen.chara[slot].motion_type;
+        g_stolen.chara[slot].frame = CopyFrameVu1(static_cast<CFrameVu1 *>(source.template_chara.frame), &g_stolen_alloc);
+    }
+
+    g_stolen.slot_count = kStolenSlots;
+    g_stolen.texture_block = source.texture_block;
+    g_stolen.effect_data = &g_stolen_data;
+
+    g_stolen_ready = true;
+    g_stolen_source = &source;
+    g_stolen_source_data = source.effect_data;
+    g_stolen_unit = NowMonstorUnit;
+    g_stolen_floor = UserStatus->cur_floor;
+    g_stolen_map = selectMapNo;
+    return true;
 }
 
 /**
@@ -1392,6 +1516,58 @@ void ShowDungeonMessage(std::string_view text, int frames) {
     DngMessMan.timer = frames;
 }
 
+void OnSteal(const MONSTOR &monster, int owner) {
+    if (!StealsShots(owner)) {
+        return;
+    }
+
+    CSHOT_EFFECT *source = Projectile(monster.shot_effect);
+
+    if (source == nullptr) {
+        source = Projectile(monster.shot_effect2);
+    }
+
+    if (source == nullptr || !StolenBuild(*source)) {
+        return;
+    }
+
+    ShowDungeonMessage("Projectile stolen! Your shots\nare its shots on this floor.", 4 * kStepsPerSecond);
+}
+
+bool FireStolenShot(const float *origin, const float *direction, int damage, int owner) {
+    if (!StealsShots(owner) || !StolenValid()) {
+        return false;
+    }
+
+    sceVu0FVECTOR position = {origin[0], origin[1], origin[2], 1.0f};
+    sceVu0FVECTOR target = {origin[0] + direction[0], origin[1] + direction[1], origin[2] + direction[2], 1.0f};
+
+    // No free slot: the shot goes as it would.
+    if (g_stolen.Set(position, target, owner, -1, 0, nullptr, -1) == -1) {
+        return false;
+    }
+
+    // The shot keeps its own element and ailments; the weapon's abilities and monster bonuses
+    // ride along as on any of the character's shots.
+    g_stolen.SetWepStatus(NowWeaponHave->flags);
+    g_stolen.SetVsMonster(NowWeaponHave->vs_monster);
+    g_stolen.SetDmg(static_cast<int>(static_cast<float>(damage) * kStolenDamage));
+    g_stolen.SetWait(kStolenHitWait);
+    return true;
+}
+
+void StolenShotStep() {
+    if (StolenValid()) {
+        g_stolen.Step();
+    }
+}
+
+void StolenShotDraw() {
+    if (StolenValid()) {
+        g_stolen.Draw();
+    }
+}
+
 void OnFloorStart() {
     g_curse.drain_steps = 0;
     g_owl_nearest = -1;
@@ -1400,6 +1576,7 @@ void OnFloorStart() {
     g_blade = {};
     g_stride_held = false;
     TunaReset();
+    StolenDrop();
 }
 
 } // namespace dc::game::expanded

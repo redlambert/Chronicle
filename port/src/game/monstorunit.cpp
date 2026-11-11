@@ -1373,6 +1373,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                         steal_position[1] += 12.0f;
                         StealItem.Set(steal_position, monster[current_monster].steal_item);
                         monster[current_monster].steal_item = -1;
+
+                        // Dark Cloud Expanded: Steal Shot takes the monster's projectile too.
+                        expanded::OnSteal(monster[current_monster], NowColData->hit[hit].owner);
                     }
 
                     int attacker = NowColData->hit[hit].owner;

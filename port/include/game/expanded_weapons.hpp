@@ -241,6 +241,27 @@ void OnDetach(WEAPON_HAVE *weapon, int hole);
 void ShowDungeonMessage(std::string_view text, int frames);
 
 /**
+ * A steal from monster has just landed for owner: Steal Shot takes its projectile.
+ */
+void OnSteal(const MONSTOR &monster, int owner);
+
+/**
+ * A shot owner is about to fire from origin along direction: fires the stolen projectile in its
+ * place and returns true, or returns false to let the shot go as it would.
+ */
+bool FireStolenShot(const float *origin, const float *direction, int damage, int owner);
+
+/**
+ * Each step of the dungeon loop, beside the main character's effect: the stolen shots fly.
+ */
+void StolenShotStep();
+
+/**
+ * Each dungeon draw, beside the main character's effect: the stolen shots draw.
+ */
+void StolenShotDraw();
+
+/**
  * A new floor begins: clears what each effect remembers of the last.
  */
 void OnFloorStart();

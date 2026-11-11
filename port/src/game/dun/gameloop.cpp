@@ -2341,6 +2341,7 @@ void DunMainDraw() {
         }
 
         NowMainEffect->Draw();
+        expanded::StolenShotDraw(); // Dark Cloud Expanded: Steal Shot's stolen projectiles.
     }
 
     sceVu0FVECTOR raster_pos;
@@ -3206,6 +3207,7 @@ void motionDrive() {
     OzumondFire.Step();
     OzumondShotEffect.Step();
     NowMainEffect->Step();
+    expanded::StolenShotStep(); // Dark Cloud Expanded: Steal Shot's stolen projectiles.
     NowShotData->step();
     HealEffect.Step();
 }
@@ -4370,6 +4372,11 @@ void EndAction(bool face_target = true) {
  * Puts a shot from the player's character in the first free slot, if there is one.
  */
 void SpawnShot(sceVu0FVECTOR world, sceVu0FVECTOR vector, int damage) {
+    // Dark Cloud Expanded: Steal Shot fires the stolen projectile in the pellet's place.
+    if (expanded::FireStolenShot(world, vector, damage, UserStatus->cur_chara)) {
+        return;
+    }
+
     CSHOT *shots = NowShotData;
 
     for (int i = 0; i < 12; i++) {
@@ -4523,6 +4530,17 @@ void BattleActionOn_Ruby() {
     }
 }
 
+/**
+ * Dark Cloud Expanded: Ruby's quick shot from ruby_effect_pos toward ruby_effect_vec as the
+ * stolen projectile, when Steal Shot holds one. Returns whether it fired.
+ */
+static bool RubyStolenShot(int damage) {
+    const float direction[3] = {ruby_effect_vec[0] - ruby_effect_pos[0], ruby_effect_vec[1] - ruby_effect_pos[1],
+                                ruby_effect_vec[2] - ruby_effect_pos[2]};
+
+    return expanded::FireStolenShot(ruby_effect_pos, direction, damage, CHARA_RUBY);
+}
+
 void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat) {
     WEAPON_HAVE *weapon = NowWeaponHave;
     int          element = weapon->best_elem;
@@ -4560,6 +4578,11 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
             sceVu0CopyVector(ruby_effect_vec, BtActStatus.target_position);
         }
 
+        // Dark Cloud Expanded: Steal Shot fires the stolen projectile in the quick shot's place.
+        if (RubyStolenShot(damage)) {
+            return;
+        }
+
         if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) == -1) {
             return;
         }
@@ -4577,6 +4600,11 @@ void BattleActionShotRuby(CCharacter *chara, int aimed, float scale, int repeat)
     ruby_effect_vec[0] += ruby_effect_pos[0];
     ruby_effect_vec[1] += ruby_effect_pos[1];
     ruby_effect_vec[2] += ruby_effect_pos[2];
+
+    // Dark Cloud Expanded: Steal Shot, as above.
+    if (RubyStolenShot(damage)) {
+        return;
+    }
 
     if (NowMainEffect->Set(ruby_effect_pos, ruby_effect_vec, 3, element, 0, nullptr, 1) != -1) {
         NowMainEffect->SetWepStatus(NowWeaponHave->flags);
