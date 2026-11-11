@@ -120,6 +120,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_HEAVEN_S_CLOUD, "Typhoon: hold the\nwhirlwind charge to\ngrow the blade to 3x."},
     {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
     {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
+    {ITEM_WEAPON_SWORD_OF_ZEUS, "Guard 1.5 sec; swings\ncall lightning. A long\ncharge: a lunge bolt."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -581,7 +582,75 @@ int   g_solar_steps = 0;
 int   g_solar_blind = 0;
 
 bool SolarFlashes(int item_no) {
-    return item_no == ITEM_WEAPON_SUN_SWORD || item_no == ITEM_WEAPON_BIG_BANG;
+    return item_no == ITEM_WEAPON_SUN_SWORD || item_no == ITEM_WEAPON_BIG_BANG || item_no == ITEM_WEAPON_SWORD_OF_ZEUS;
+}
+
+// Sword of Zeus: the flash calls lightning. Each bolt is the blast at half strength at its foot,
+// through any guard, and costs 10 WHP; the flash itself costs nothing. Locked on, the primed
+// swing strikes the target and every swing of the combo after it strikes again, until the combo
+// ends or the lock is let go. Not locked on, the six nearest enemies within 300 take a bolt
+// each, billed as one.
+constexpr float kBoltDamage = 0.5f;
+constexpr float kBoltWhp = 10.0f;
+constexpr float kBoltReach = 300.0f;
+constexpr int   kBoltMost = 6;
+
+bool g_zeus_chain = false;
+int  g_zeus_chain_action = 0;
+
+/**
+ * The locked-on enemy, while it lives; -1 otherwise.
+ */
+int LockedTarget() {
+    if (lockOnTargetFlag == 0 || NowMonstorUnit == nullptr || lockOnTargetNo < 0 || lockOnTargetNo >= 16) {
+        return -1;
+    }
+
+    const MONSTOR &target = NowMonstorUnit->monster[lockOnTargetNo];
+    return target.state == 2 && target.hp > 0 ? lockOnTargetNo : -1;
+}
+
+/**
+ * A bolt on monster m: the half-strength blast where it stands, which takes it without a shove.
+ */
+void BoltOn(int m) {
+    sceVu0FVECTOR at;
+    NowMonstorUnit->chara[m][0].GetPosition(at);
+    PlantBlast(at, kBoltDamage, true, m);
+}
+
+/**
+ * Bolts on the nearest enemies in reach, billed once; how many were struck.
+ */
+int BoltVolley() {
+    if (NowMonstorUnit == nullptr) {
+        return 0;
+    }
+
+    std::array<std::pair<float, int>, 16> near;
+    int                                   count = 0;
+
+    for (int m = 0; m < 16; m++) {
+        const MONSTOR &monster = NowMonstorUnit->monster[m];
+
+        if (monster.state == 2 && monster.hp > 0 && monster.player_distance > 0.0f && monster.player_distance <= kBoltReach) {
+            near[count++] = {monster.player_distance, m};
+        }
+    }
+
+    std::sort(near.begin(), near.begin() + count);
+
+    const int struck = std::min(count, kBoltMost);
+
+    for (int i = 0; i < struck; i++) {
+        BoltOn(near[i].second);
+    }
+
+    if (struck > 0) {
+        DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
+    }
+
+    return struck;
 }
 
 // Big Bang "Detonate": its whirlwind is the blast at Toan's feet, and a primed swing while
@@ -632,12 +701,7 @@ void SolarStep(int held) {
  * The flash, as a primed swing lands: a hit on every enemy in reach, each stopped for the
  * blindness.
  */
-void SolarFlash() {
-    if (g_solar != Solar::Primed || NowMonstorUnit == nullptr) {
-        return;
-    }
-
-    g_solar = Solar::Idle;
+void SolarBlind() {
     g_solar_blind = kSolarBlindSteps;
 
     const int damage = std::max(1, static_cast<int>(static_cast<float>(NowWeaponHave->attack) * kSolarDamage));
@@ -678,6 +742,31 @@ void SolarFlash() {
 
     // A white pulse on Toan as the room is blinded.
     setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+}
+
+void SolarFlash() {
+    if (g_solar != Solar::Primed || NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    g_solar = Solar::Idle;
+
+    // Sword of Zeus: lightning with the flash, which costs nothing of its own.
+    if (NowWeaponHave->item_no == ITEM_WEAPON_SWORD_OF_ZEUS) {
+        if (const int target = LockedTarget(); target >= 0) {
+            BoltOn(target);
+            DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
+            g_zeus_chain = true;
+            g_zeus_chain_action = BtActStatus.action_no;
+        } else {
+            BoltVolley();
+        }
+
+        SolarBlind();
+        return;
+    }
+
+    SolarBlind();
 
     // Detonate: locked on, the blast lands on the target, through any guard.
     if (NowWeaponHave->item_no == ITEM_WEAPON_BIG_BANG && lockOnTargetFlag != 0 && lockOnTargetNo >= 0 && lockOnTargetNo < 16 &&
@@ -690,6 +779,106 @@ void SolarFlash() {
     }
 
     DrainWhp(NowWeaponHave->item_no, kSolarWhp);
+}
+
+/**
+ * A combo swing of the Sword of Zeus's chain lands: the next bolt and flash on the target.
+ */
+void ZeusChainHit() {
+    const int target = LockedTarget();
+
+    if (target < 0) {
+        g_zeus_chain = false;
+        return;
+    }
+
+    BoltOn(target);
+    DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
+    SolarBlind();
+}
+
+// The Sword of Zeus's charge attack: it gives up the whirlwind, and a charge held three seconds
+// past the lunge's level is its own, flashed on Toan; released, the lunge brings a bolt down 40
+// units ahead of where it lands, or on the locked-on enemy.
+constexpr float kLungeCharge = 1.5f;
+constexpr int   kZeusChargeSteps = 3 * kStepsPerSecond;
+constexpr float kBoltAhead = 40.0f;
+constexpr int   kComboFirst = 0x24;
+constexpr int   kComboLast = 0x28;
+constexpr int   kLunge = 0xF;
+
+int   g_zeus_charge_steps = 0;
+bool  g_zeus_charged = false;
+bool  g_zeus_lunging = false;
+float g_zeus_lunge_from[3] = {};
+
+void ZeusStep(int held) {
+    if (held != ITEM_WEAPON_SWORD_OF_ZEUS) {
+        g_zeus_chain = false;
+        g_zeus_charged = false;
+        g_zeus_lunging = false;
+        g_zeus_charge_steps = 0;
+        return;
+    }
+
+    const int action = BtActStatus.action_no;
+
+    // The chain ends with the combo, a new combo or the lock let go.
+    if (g_zeus_chain) {
+        const bool swinging = action >= kComboFirst && action <= kComboLast;
+
+        if (!swinging || action < g_zeus_chain_action || LockedTarget() < 0) {
+            g_zeus_chain = false;
+        } else {
+            g_zeus_chain_action = action;
+        }
+    }
+
+    if (action == 14) {
+        if (BtActStatus.charge_time >= kLungeCharge && !g_zeus_charged && ++g_zeus_charge_steps >= kZeusChargeSteps) {
+            g_zeus_charged = true;
+            setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
+        }
+
+        return;
+    }
+
+    if (action == kLunge && g_zeus_charged) {
+        if (!g_zeus_lunging) {
+            g_zeus_lunging = true;
+            g_zeus_lunge_from[0] = CharaMain.pos[0];
+            g_zeus_lunge_from[1] = CharaMain.pos[1];
+            g_zeus_lunge_from[2] = CharaMain.pos[2];
+        }
+
+        return;
+    }
+
+    // The lunge is over: the bolt.
+    if (g_zeus_lunging) {
+        if (const int target = LockedTarget(); target >= 0) {
+            BoltOn(target);
+        } else {
+            float       at[4] = {CharaMain.pos[0], CharaMain.pos[1], CharaMain.pos[2], 1.0f};
+            const float dx = at[0] - g_zeus_lunge_from[0];
+            const float dz = at[2] - g_zeus_lunge_from[2];
+            const float length = std::sqrt(dx * dx + dz * dz);
+
+            if (length > 1e-3f) {
+                at[0] += dx / length * kBoltAhead;
+                at[2] += dz / length * kBoltAhead;
+            }
+
+            PlantBlast(at, kBoltDamage, true);
+        }
+
+        DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
+        setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+    }
+
+    g_zeus_lunging = false;
+    g_zeus_charged = false;
+    g_zeus_charge_steps = 0;
 }
 
 // ── Heaven's Cloud "Typhoon" ────────────────────────────────────────────────────────────────
@@ -1821,6 +2010,11 @@ void ToanKickBack(float *origin, float speed, float decay) {
 
     NowColData->SetKickBack(origin, speed, decay, 2);
 
+    // The Sword of Zeus's chain: each swing of the combo strikes again.
+    if (g_zeus_chain) {
+        ZeusChainHit();
+    }
+
     // Solar Flash: the primed blade lets go as this swing lands.
     SolarFlash();
 }
@@ -1885,6 +2079,7 @@ void DungeonStep() {
 
     TyphoonStep(held);
     SolarStep(held);
+    ZeusStep(held);
     BladeStep(held);
     WiseOwlStep();
     WhpStep();
@@ -2570,6 +2765,11 @@ void OnToanWhirl(CSHOT_EFFECT *effect, int slot) {
     }
 }
 
+bool WhirlwindUnlocked() {
+    // The Sword of Zeus gives the whirlwind up for its own charge.
+    return UserStatus->skill_owned[0] != 0 && ToanWeapon() != ITEM_WEAPON_SWORD_OF_ZEUS;
+}
+
 void DrainWhp(int item_no, float base_whp) {
     if (NowWeaponHave == nullptr || NowWeaponHave->item_no != item_no || base_whp <= 0.0f) {
         return;
@@ -2704,6 +2904,10 @@ void OnFloorStart() {
     g_solar = Solar::Idle;
     g_solar_blind = 0;
     g_blast_crush = {};
+    g_zeus_chain = false;
+    g_zeus_charged = false;
+    g_zeus_lunging = false;
+    g_zeus_charge_steps = 0;
     g_whp_bill = 0.0f;
     g_whp_item = -1;
 }

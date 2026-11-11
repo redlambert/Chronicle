@@ -430,7 +430,8 @@ void ToanKey_Play() {
             setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
         }
 
-        if (UserStatus->skill_owned[0] != 0 && BtActStatus.charge_time >= 2.5f && BtActStatus.charge_level == 1) {
+        // Dark Cloud Expanded: the Sword of Zeus gives the whirlwind up.
+        if (expanded::WhirlwindUnlocked() && BtActStatus.charge_time >= 2.5f && BtActStatus.charge_level == 1) {
             BtActStatus.charge_level = 2;
             setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
         }
@@ -439,7 +440,7 @@ void ToanKey_Play() {
             if (BtActStatus.charge_time >= 1.5f) {
                 int charged = 0;
 
-                if (UserStatus->skill_owned[0] != 0 && BtActStatus.charge_time >= 2.5f) {
+                if (expanded::WhirlwindUnlocked() && BtActStatus.charge_time >= 2.5f) {
                     charged = 1;
                 }
 

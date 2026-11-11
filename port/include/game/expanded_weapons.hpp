@@ -321,6 +321,12 @@ void OnRubyShot(CSHOT_EFFECT *effect, int slot, bool charged);
 void OnToanWhirl(CSHOT_EFFECT *effect, int slot);
 
 /**
+ * Whether Toan's charge may become the whirlwind: the skill learned, and a sword that keeps it
+ * (the Sword of Zeus gives it up for its own charge).
+ */
+bool WhirlwindUnlocked();
+
+/**
  * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid
  * through the game's own wear on the next walking step, if that weapon is still in hand.
  */
