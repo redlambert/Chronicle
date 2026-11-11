@@ -3405,8 +3405,16 @@ void SwordDmgCheck1(float amount, int kind) {
     float        was = weapon->durability_f;
     auto         warn = static_cast<float>(weapon->durability * 0.2);
 
+    // Dark Cloud Expanded: the weapon as it was, for Atlamillia Insurance.
+    const WEAPON_HAVE before = *weapon;
+
     // Dark Cloud Expanded: the Steel Slingshot wears slower when nearly broken.
     int broke = BattleSubWeaponDmg(expanded::WearAmount(amount), kind);
+
+    // Dark Cloud Expanded: a break that took the weapon from the bag is insured.
+    if (broke != 0 && weapon->item_no == -1) {
+        expanded::OnWeaponBroke(before);
+    }
 
     // The Chronicle sword says so once, as its durability crosses a fifth.
     if (weapon->item_no == ITEM_WEAPON_LAMB_S_SWORD && weapon->durability_f <= warn && was >= warn) {

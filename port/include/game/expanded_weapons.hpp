@@ -12,6 +12,7 @@
 namespace dc::game {
 
 class CCollisionData;
+class CDungeonMap;
 class CMonstorUnit;
 class CSHOT;
 class CSHOT_EFFECT;
@@ -336,6 +337,24 @@ void UngagaStrike(const float *tip);
  * its locked door without one, or -1 to let the item window open as it would.
  */
 int SkeletonKey(const int *usable);
+
+/**
+ * The active character's weapon, copied as it was, has just broken and been taken from the
+ * bag: Atlamillia Insurance saves it as a SynthSphere.
+ */
+void OnWeaponBroke(const WEAPON_HAVE &weapon);
+
+/**
+ * A floor's chests and atla have just been placed (main_floor 0 for its back floor): an insured
+ * SynthSphere's chest joins them.
+ */
+void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor);
+
+/**
+ * An attachment has just gone into the bag's slot: an insured chest's SynthSphere takes on the
+ * broken weapon's stats.
+ */
+void OnAttachmentAdded(int slot);
 
 /**
  * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid

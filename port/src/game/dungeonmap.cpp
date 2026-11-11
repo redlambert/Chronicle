@@ -1,5 +1,7 @@
 #include "dungeonmap.hpp"
 
+#include "expanded_weapons.hpp"
+
 #include <libvu0.h>
 
 #include <algorithm>
@@ -2446,6 +2448,9 @@ void CDungeonMap::buildEventData(int floor_no, int enabled, int place_atla) {
             }
         }
     }
+
+    // Dark Cloud Expanded: an insured SynthSphere's chest joins the floor's.
+    expanded::OnFloorEvents(this, floor_no, place_atla);
 
     this->initTrapCircle();
 

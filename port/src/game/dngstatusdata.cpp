@@ -4,6 +4,8 @@
 #include <cstdlib>
 
 #include "dngstatusdata.hpp"
+
+#include "expanded_weapons.hpp"
 #include "dun/gameloop.hpp"
 #include "itemdata.hpp"
 #include "menu_dungeon.hpp"
@@ -295,6 +297,9 @@ int CDngStatusData::GetItem(int item_id, int qty) {
 
             this->consumable_items[slot].id = static_cast<s16>(item_id);
             SetAttachMentValue(item_id, slot, static_cast<short>(qty), nullptr);
+
+            // Dark Cloud Expanded: an insured chest's SynthSphere takes on its weapon's stats.
+            expanded::OnAttachmentAdded(slot);
 
             const auto held_count = std::ranges::count_if(
                 this->consumable_items, [](const DNG_CONSUMABLE &consumable) { return IsConsumable(consumable.id); });

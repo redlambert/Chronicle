@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <format>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -19,6 +20,7 @@
 #include "dngmessageman.hpp"
 #include "dngstatusdata.hpp"
 #include "dungeonmap.hpp"
+#include "dungeonparts.hpp"
 #include "dun/gameloop.hpp"
 #include "frame.hpp"
 #include "framevu1.hpp"
@@ -123,6 +125,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SWORD_OF_ZEUS, "Guard 1.5 sec; swings\ncall lightning. A long\ncharge: a lunge bolt."},
     {ITEM_WEAPON_HERCULES_WRATH, "Guard 5 sec: the next\nswing calls a blast\nthrough any guard."},
     {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
+    {ITEM_WEAPON_ATLAMILLIA_SWORD, "Owned: a weapon that\nbreaks leaves a Synth-\nSphere in a chest."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -933,6 +936,45 @@ void HerculesStep(int held) {
 
             break;
     }
+}
+
+// ── Atlamillia Sword "Atlamillia Insurance" ─────────────────────────────────────────────────
+
+// While an Atlamillia Sword is owned, a weapon that breaks in a dungeon is saved as a SynthSphere
+// of itself, at a tenth of its stats per level plus one, up to half; its attachments are lost.
+// The sphere waits in a small chest on a random floor of that dungeon that has atla, placed each
+// time that floor is built until it is taken (Demon Shaft has none: the next floor built). It
+// lasts until the game is closed.
+struct InsuredSphere {
+    int         dungeon;
+    int         floor; // -1: the next floor built
+    ATTACH_LIST sphere;
+    int         box; // its chest on the floor as built now, or -1
+};
+
+std::vector<InsuredSphere> g_insured;
+std::string                g_insured_notice; // said once the game's own break message is done
+
+int InsuredFloor(int dungeon) {
+    if (dungeon < 0 || dungeon >= 6 || UserStatus == nullptr) {
+        return -1;
+    }
+
+    std::array<int, 40> floors;
+    int                 count = 0;
+
+    for (int floor = 0; floor < 40; floor++) {
+        const bool has_atla = std::ranges::any_of(UserStatus->atra_grid[dungeon][floor], [](s32 slot) { return slot != -1; });
+        const bool taken = std::ranges::any_of(g_insured, [&](const InsuredSphere &other) {
+            return other.dungeon == dungeon && other.floor == floor;
+        });
+
+        if (has_atla && !taken) {
+            floors[count++] = floor;
+        }
+    }
+
+    return count > 0 ? floors[std::rand() % count] : -1;
 }
 
 // ── Heaven's Cloud "Typhoon" ────────────────────────────────────────────────────────────────
@@ -2139,6 +2181,12 @@ void DungeonStep() {
     WiseOwlStep();
     WhpStep();
 
+    // Atlamillia Insurance's notice, once the game's own break message has gone.
+    if (!g_insured_notice.empty() && DngMessMan.timer <= 0) {
+        ShowDungeonMessage(g_insured_notice.c_str(), 5 * kStepsPerSecond);
+        g_insured_notice.clear();
+    }
+
     // The allies' ongoing effects.
     g_step_count++;
     StrideStep();
@@ -2860,6 +2908,108 @@ int SkeletonKey(const int *usable) {
     }
 
     return -1;
+}
+
+void OnWeaponBroke(const WEAPON_HAVE &weapon) {
+    if (!Owned(ITEM_WEAPON_ATLAMILLIA_SWORD) || weapon.item_no < 0) {
+        return;
+    }
+
+    const int level = weapon.level;
+    const int share = std::min(50, (level + 1) * 10);
+
+    InsuredSphere insured{};
+    insured.dungeon = selectMapNo;
+    insured.floor = InsuredFloor(selectMapNo);
+    insured.box = -1;
+
+    ATTACH_LIST &sphere = insured.sphere;
+    sphere.item_no = ITEM_ATTACH_SYNTHESIS_SPHERE;
+    sphere.sphere_weapon_no = weapon.item_no;
+    sphere.sphere_flags = static_cast<s16>(weapon.flags);
+    sphere.sphere_level = static_cast<s8>(std::min(level, 127));
+
+    const s16 stats[4] = {weapon.attack, weapon.endurance, weapon.speed, weapon.magic};
+
+    for (int i = 0; i < 4; i++) {
+        sphere.status[i] = static_cast<s16>(stats[i] * share / 100);
+    }
+
+    for (int i = 0; i < 5; i++) {
+        sphere.elem[i] = static_cast<s8>(weapon.elem[i] * share / 100);
+    }
+
+    for (int i = 0; i < 10; i++) {
+        sphere.vs_monster[i] = static_cast<s8>(weapon.vs_monster[i] * share / 100);
+    }
+
+    g_insured.push_back(insured);
+
+    g_insured_notice = insured.floor >= 0
+                           ? std::format("Atlamillia Insurance! A SynthSphere\nof it waits on floor {}.", insured.floor + 1)
+                           : std::string("Atlamillia Insurance! A SynthSphere\nof it waits on the next floor.");
+}
+
+void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor) {
+    if (map == nullptr || main_floor == 0) {
+        return;
+    }
+
+    for (InsuredSphere &insured : g_insured) {
+        insured.box = -1;
+
+        if (insured.dungeon != selectMapNo || (insured.floor != -1 && insured.floor != floor_no)) {
+            continue;
+        }
+
+        for (int attempt = 0; attempt < 200; attempt++) {
+            float pos[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+            SearchiDoPutArea(map->cells, 0, 0, 20, 20, pos);
+
+            if (map->CheckTreasureBox(pos, 20.0f) == 0 || map->CheckAtra(pos, 20.0f) == 0 || map->CheckTrapCircle(pos, 20.0f) != nullptr) {
+                continue;
+            }
+
+            if (map->SetTreasureBox(pos, ITEM_ATTACH_SYNTHESIS_SPHERE, TREASURE_BOX_SMALL, 0) == -1) {
+                break;
+            }
+
+            for (int box = 0; box < 24; box++) {
+                const TREASURE_BOX &chest = map->boxes[box];
+
+                if (chest.used != 0 && chest.item_no == ITEM_ATTACH_SYNTHESIS_SPHERE && chest.pos[0] == pos[0] && chest.pos[2] == pos[2]) {
+                    insured.box = box;
+                    break;
+                }
+            }
+
+            break;
+        }
+    }
+}
+
+void OnAttachmentAdded(int slot) {
+    if (SaveData == nullptr || NowDngMap == nullptr || g_insured.empty()) {
+        return;
+    }
+
+    CDngStatusData *status = SaveData->GetDngStatus();
+    auto           *attach = reinterpret_cast<ATTACH_LIST *>(&status->consumable_items[slot]);
+
+    if (attach->item_no != ITEM_ATTACH_SYNTHESIS_SPHERE) {
+        return;
+    }
+
+    // The sphere comes from an insured chest of this floor that has just been opened.
+    for (auto insured = g_insured.begin(); insured != g_insured.end(); ++insured) {
+        if (insured->dungeon != selectMapNo || insured->box < 0 || NowDngMap->boxes[insured->box].closed != 0) {
+            continue;
+        }
+
+        *attach = insured->sphere;
+        g_insured.erase(insured);
+        return;
+    }
 }
 
 void DrainWhp(int item_no, float base_whp) {
