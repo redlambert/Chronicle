@@ -25,6 +25,8 @@
 #include "monstorunit.hpp"
 #include "randomitem.hpp"
 #include "savedata.hpp"
+#include "shot_effect.hpp"
+#include "shot_freefuncs.hpp"
 #include "stockitem.hpp"
 #include "text/gametext.hpp"
 #include "userstatus.hpp"
@@ -94,6 +96,10 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SCORPION, "Its poison cures yours\nand soaks up half the\nenemy's ABS."},
     {ITEM_WEAPON_SNAIL, "Slime Trail: hits may\nleave enemies stuck."},
     {ITEM_WEAPON_SKUNK, "Its flamethrower\nreaches twice as far."},
+    {ITEM_WEAPON_DRAGON_S_Y, "Locks on from twice\nas far, and moves\nfaster when locked on."},
+    {ITEM_WEAPON_HALBERT, "Tornado: its charge\nshot flies faster\nand hits wider."},
+    {ITEM_WEAPON_TALL_HAMMER, "Each hit shrinks the\nenemy, down to 30%\nof its size."},
+    {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
 /**
@@ -429,6 +435,203 @@ void BladeStep(int held) {
     ScaleBlade(held, factor);
 }
 
+// ── Xiao: the lock-on stride ────────────────────────────────────────────────────────────────
+
+// Dragon's Y and the weapons built from it move faster while locked on. Her walk is root
+// motion, so the strafe and guard-walk motions playing faster carry her faster too.
+constexpr float kLockOnStride = 1.3f;
+constexpr int   kLockOnMotions[] = {19, 20, 21, 22, 8, 9, 10, 33};
+
+bool g_stride_held = false;
+
+void StrideStep() {
+    const bool grants = Is(HeldBy(CHARA_XIAO), {ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
+                                                ITEM_WEAPON_ANGEL_SHOOTER, ITEM_WEAPON_ANGE_GEAR});
+    const bool want = grants && lockOnTargetFlag != 0 && std::ranges::find(kLockOnMotions, CharaMain.motion_no) !=
+                                                             std::end(kLockOnMotions);
+
+    // The game puts the motion back to its own speed whenever the motion changes, so the
+    // stride is set again each step.
+    if (want) {
+        CharaMain.motion_speed = kLockOnStride;
+        g_stride_held = true;
+    } else if (g_stride_held) {
+        if (CharaMain.motion_speed == kLockOnStride) {
+            CharaMain.motion_speed = -1.0f;
+        }
+
+        g_stride_held = false;
+    }
+}
+
+// ── Ungaga: the Halberd line's charge shot ─────────────────────────────────────────────────
+
+/**
+ * A form of Tornado Charge Buff: how much faster the charge shot flies and how much larger it
+ * is drawn and hits.
+ */
+struct TornadoForm {
+    float travel;
+    float scale;
+};
+
+const TornadoForm *TornadoFormOf(int item_no) {
+    static constexpr TornadoForm kHalberd = {1.4f, 1.1f};
+    static constexpr TornadoForm kScorpion = {1.7f, 1.3f};
+    static constexpr TornadoForm kMirage = {2.0f, 1.5f};
+    static constexpr TornadoForm kHercules = {2.5f, 1.7f};
+
+    switch (item_no) {
+        case ITEM_WEAPON_HALBERT:
+            return &kHalberd;
+        case ITEM_WEAPON_SCORPION:
+            return &kScorpion;
+        case ITEM_WEAPON_MIRAGE:
+        case ITEM_WEAPON_CACTUS:
+            return &kMirage;
+        case ITEM_WEAPON_HERCULES_WRATH:
+        case ITEM_WEAPON_TERRA_SWORD:
+        case ITEM_WEAPON_BABEL_S_SPEAR:
+            return &kHercules;
+        default:
+            return nullptr;
+    }
+}
+
+// The effect's description, copied with the form's speeds and radii, stands in for the game's
+// while the spear is held; the game's own is kept to put back.
+BT_SHOT_EFFECT     g_tornado_data = {};
+BT_SHOT_EFFECT    *g_tornado_original = nullptr;
+CSHOT_EFFECT      *g_tornado_effect = nullptr;
+const TornadoForm *g_tornado_form = nullptr;
+
+void TornadoScale(CSHOT_EFFECT *effect, float scale) {
+    float size[4] = {scale, scale, scale, 1.0f};
+
+    for (CCharacter &chara : effect->chara) {
+        chara.SetScale(size);
+    }
+}
+
+void TornadoRestore() {
+    if (g_tornado_effect != nullptr && g_tornado_effect->effect_data == &g_tornado_data) {
+        g_tornado_effect->effect_data = g_tornado_original;
+        TornadoScale(g_tornado_effect, 1.0f);
+    }
+
+    g_tornado_effect = nullptr;
+    g_tornado_original = nullptr;
+    g_tornado_form = nullptr;
+}
+
+void TornadoStep() {
+    const TornadoForm *form = TornadoFormOf(HeldBy(CHARA_UNGAGA));
+    CSHOT_EFFECT      *effect = NowMainEffect;
+
+    if (form == nullptr || effect == nullptr || effect->effect_data == nullptr) {
+        TornadoRestore();
+        return;
+    }
+
+    // Still ours: nothing to do. A floor load or a menu reloads the effect with the game's own
+    // description, which is then replaced again.
+    if (effect == g_tornado_effect && form == g_tornado_form && effect->effect_data == &g_tornado_data) {
+        return;
+    }
+
+    TornadoRestore();
+
+    // The shot reads its speed when it starts or changes phase, and its radius each step.
+    g_tornado_original = effect->effect_data;
+    g_tornado_data = *g_tornado_original;
+
+    for (int phase = 0; phase < 4; phase++) {
+        g_tornado_data.speed[phase] *= form->travel;
+        g_tornado_data.radius[phase] *= form->scale;
+    }
+
+    effect->effect_data = &g_tornado_data;
+    g_tornado_effect = effect;
+    g_tornado_form = form;
+    TornadoScale(effect, form->scale);
+}
+
+// ── Goro: Cold Storage ──────────────────────────────────────────────────────────────────────
+
+// The Frozen Tuna banks 2 HP for each WHP it wears. Once Goro is hurt the bank flows back into
+// his life at 2 HP a second, while he is below his max; a repair empties it.
+constexpr float kTunaHealPerWhp = 2.0f;
+constexpr float kTunaHealPerStep = 2.0f / kStepsPerSecond;
+
+float g_tuna_bank = 0.0f;
+float g_tuna_carry = 0.0f;
+bool  g_tuna_healing = false;
+float g_tuna_last_whp = -1.0f;
+int   g_tuna_last_hp = -1;
+int   g_tuna_rolled_step = -1;
+int   g_step_count = 0;
+
+void TunaReset() {
+    g_tuna_bank = 0.0f;
+    g_tuna_carry = 0.0f;
+    g_tuna_healing = false;
+    g_tuna_last_whp = -1.0f;
+    g_tuna_last_hp = -1;
+}
+
+void TunaStep() {
+    if (HeldBy(CHARA_GORO) != ITEM_WEAPON_FROZEN_TUNA) {
+        TunaReset();
+        return;
+    }
+
+    const float whp = NowWeaponHave->durability_f;
+    const int   hp = UserStatus->hp[CHARA_GORO];
+    const int   max_hp = UserStatus->max_hp[CHARA_GORO];
+
+    if (g_tuna_last_whp >= 0.0f) {
+        if (whp < g_tuna_last_whp) {
+            g_tuna_bank += (g_tuna_last_whp - whp) * kTunaHealPerWhp;
+        } else if (whp > g_tuna_last_whp) {
+            g_tuna_bank = 0.0f;
+            g_tuna_carry = 0.0f;
+            g_tuna_healing = false;
+        }
+    }
+
+    if (g_tuna_last_hp >= 0 && hp < g_tuna_last_hp && g_tuna_bank > 0.0f) {
+        g_tuna_healing = true;
+    }
+
+    if (g_tuna_healing && g_tuna_bank > 0.0f && hp > 0 && hp < max_hp) {
+        const float drain = std::min(kTunaHealPerStep, g_tuna_bank);
+        g_tuna_bank -= drain;
+        g_tuna_carry += drain;
+
+        const int heal = static_cast<int>(g_tuna_carry);
+
+        if (heal > 0) {
+            UserStatus->hp[CHARA_GORO] = static_cast<s16>(std::min(hp + heal, max_hp));
+            g_tuna_carry -= static_cast<float>(heal);
+        }
+    }
+
+    if (g_tuna_bank <= 0.0f) {
+        g_tuna_healing = false;
+    }
+
+    g_tuna_last_whp = whp;
+    g_tuna_last_hp = UserStatus->hp[CHARA_GORO];
+}
+
+/**
+ * Whether a monster is one of the ice kind the Frozen Tuna's frost leaves alone: Blizzard,
+ * Sam and the Ice Gemron.
+ */
+bool IceMonster(const MONSTOR &monster) {
+    return monster.name_no == 65 || monster.name_no == 85 || monster.name_no == 312;
+}
+
 } // namespace
 
 // ── Who holds what ──────────────────────────────────────────────────────────────────────────
@@ -691,6 +894,52 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
         monster.slow_timer = kGooFrames;
     }
 
+    // Tall Hammer: each hit shrinks the enemy by a tenth of its size, down to 30%.
+    constexpr float kShrinkStep = 0.1f;
+    constexpr float kShrinkLeast = 0.3f;
+
+    if (held == ITEM_WEAPON_TALL_HAMMER && NowMonstorUnit != nullptr) {
+        const int index = static_cast<int>(&monster - NowMonstorUnit->monster);
+
+        if (index >= 0 && index < 16) {
+            CCharacter &body = NowMonstorUnit->chara[index][0];
+            float       size[4];
+            body.GetScale(size);
+
+            if (size[0] > kShrinkLeast || size[1] > kShrinkLeast || size[2] > kShrinkLeast) {
+                for (int axis = 0; axis < 3; axis++) {
+                    size[axis] = std::max(kShrinkLeast, size[axis] - kShrinkStep);
+                }
+
+                body.SetScale(size);
+            }
+        }
+    }
+
+    // Cold Storage: one hit in twenty freezes every enemy on the floor but the ice kind, for
+    // five seconds, and Goro with them for three. One roll a step, however many it hits.
+    constexpr int kTunaPercent = 5;
+    constexpr int kTunaEnemyFrames = 300;
+    constexpr int kTunaSelfFrames = 180;
+
+    if (held == ITEM_WEAPON_FROZEN_TUNA && NowMonstorUnit != nullptr && g_tuna_rolled_step != g_step_count) {
+        g_tuna_rolled_step = g_step_count;
+
+        if (std::rand() % 100 < kTunaPercent) {
+            for (MONSTOR &other : NowMonstorUnit->monster) {
+                if (other.state == 2 && !IceMonster(other)) {
+                    other.stop_timer = kTunaEnemyFrames;
+                }
+            }
+
+            BtSetStatusErr(AILMENT_FREEZE);
+
+            if ((UserStatus->ailments[owner] & AILMENT_FREEZE) != 0) {
+                UserStatus->ailment_frames[owner] = kTunaSelfFrames;
+            }
+        }
+    }
+
     // Scorpion: when its poison takes hold, Ungaga's own poison is drawn out and the weapon
     // soaks up half the enemy's ABS.
     if (held == ITEM_WEAPON_SCORPION && poisoned && NowWeaponHave != nullptr) {
@@ -791,6 +1040,12 @@ void DungeonStep() {
 
     BladeStep(held);
     WiseOwlStep();
+
+    // The allies' ongoing effects.
+    g_step_count++;
+    StrideStep();
+    TornadoStep();
+    TunaStep();
 }
 
 void SpringStep(bool in_spring) {
@@ -1143,6 +1398,8 @@ void OnFloorStart() {
     g_owl_out_of_range = true;
     g_knife_was_in_spring = false;
     g_blade = {};
+    g_stride_held = false;
+    TunaReset();
 }
 
 } // namespace dc::game::expanded
