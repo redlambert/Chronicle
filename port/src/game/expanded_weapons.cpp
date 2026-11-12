@@ -26,6 +26,7 @@
 #include "framevu1.hpp"
 #include "gameutil.hpp"
 #include "hitvalue.hpp"
+#include "mainselect.hpp"
 #include "menu_inventory.hpp"
 #include "mds.hpp"
 #include "menuetc.hpp"
@@ -1924,6 +1925,51 @@ void ConfuseStep() {
     }
 }
 
+// ── Floor cleared ───────────────────────────────────────────────────────────────────────────
+
+// Once every monster on a floor is gone, a message says so. It waits half a second with the floor
+// empty, so a floor still loading its monsters never shows it.
+constexpr int kFloorClearSettleSteps = kStepsPerSecond / 2;
+constexpr int kFloorClearMessageSteps = 4 * kStepsPerSecond;
+
+bool g_floor_had_monsters = false;
+bool g_floor_clear_shown = false;
+int  g_floor_empty_steps = 0;
+
+void FloorClearReset() {
+    g_floor_had_monsters = false;
+    g_floor_clear_shown = false;
+    g_floor_empty_steps = 0;
+}
+
+void FloorClearStep() {
+    if (NowMonstorUnit == nullptr || g_floor_clear_shown) {
+        return;
+    }
+
+    bool any = false;
+
+    for (const MONSTOR &monster : NowMonstorUnit->monster) {
+        if (monster.state != -1 && monster.hp > 0) {
+            any = true;
+            break;
+        }
+    }
+
+    if (any) {
+        g_floor_had_monsters = true;
+        g_floor_empty_steps = 0;
+        return;
+    }
+
+    if (!g_floor_had_monsters || ++g_floor_empty_steps < kFloorClearSettleSteps) {
+        return;
+    }
+
+    g_floor_clear_shown = true;
+    ShowDungeonMessage("There is no sign of monsters\non this floor.", kFloorClearMessageSteps);
+}
+
 // ── Empty SynthSphere ───────────────────────────────────────────────────────────────────────
 
 // An unfilled SynthSphere in a weapon's first hole raises a weapon below +5 to +5, each level
@@ -2465,6 +2511,7 @@ void DungeonStep() {
     // The allies' ongoing effects.
     g_step_count++;
     ConfuseStep();
+    FloorClearStep();
     StrideStep();
     TornadoStep();
     TunaStep();
@@ -2949,6 +2996,11 @@ short *SystemText(int line) {
     }
 
     return reinterpret_cast<short *>(codes.data());
+}
+
+bool DemonShaftOpen() {
+    // Demon Shaft waits for the game to be cleared, even where a story flag shows it early.
+    return GameClearFlag != 0;
 }
 
 void TagAbilities(WEAPON_HAVE *weapon) {
@@ -3606,6 +3658,7 @@ void OnFloorStart() {
     g_whp_bill = 0.0f;
     g_whp_item = -1;
     ConfuseReset();
+    FloorClearReset();
 }
 
 } // namespace dc::game::expanded

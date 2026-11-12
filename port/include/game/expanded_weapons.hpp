@@ -211,6 +211,11 @@ int AbilityMessage(int bit);
 short *SystemText(int line);
 
 /**
+ * Whether the world map may offer Demon Shaft: only once the game has been cleared.
+ */
+bool DemonShaftOpen();
+
+/**
  * Gives a weapon the abilities it carries natively in Expanded (Babel's Spear's Confuse).
  */
 void TagAbilities(WEAPON_HAVE *weapon);

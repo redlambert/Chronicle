@@ -8191,6 +8191,11 @@ int GetVisitInfo(int place, int menu_mode) {
     if (!dungeon) {
         visits = BtlMenuSaveDataPt->VisitMap(map_no, 0);
 
+        // Dark Cloud Expanded: Demon Shaft stays closed until the game is cleared.
+        if (place == WORLD_PLACE_DEMON_SHAFT && !expanded::DemonShaftOpen()) {
+            visits = 0;
+        }
+
         switch (NowGetGameFlagForBtlMenu(menu_mode)) {
             case MENU_MOVE_WORLD_MAP:
             case MENU_MOVE_WORLD_MAP_DIRECT:
