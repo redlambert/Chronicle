@@ -126,6 +126,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_HERCULES_WRATH, "Guard 5 sec: the next\nswing calls a blast\nthrough any guard."},
     {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_ATLAMILLIA_SWORD, "Owned: a weapon that\nbreaks leaves a Synth-\nSphere in a chest."},
+    {ITEM_WEAPON_ANGEL_SHOOTER, "Guarding, Heal works\nevery second."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -3009,6 +3010,37 @@ void OnAttachmentAdded(int slot) {
         *attach = insured->sphere;
         g_insured.erase(insured);
         return;
+    }
+}
+
+/**
+ * Guardian Grace: Xiao guarding with the Angel Shooter or the Angel Gear, its Heal live.
+ */
+bool GuardianGrace() {
+    const int held = HeldBy(CHARA_XIAO);
+
+    return (held == ITEM_WEAPON_ANGEL_SHOOTER || held == ITEM_WEAPON_ANGE_GEAR) && BtActStatus.guard_mode == kGuarding &&
+           (NowWeaponHave->flags & 0x800) != 0;
+}
+
+int HealCounter(int counter, int threshold) {
+    // The Heal tick comes every second while she guards, the game's own 1 HP each time.
+    constexpr int kGraceFrames = 60;
+    static bool   was_guarding = false;
+
+    const bool grace = GuardianGrace();
+
+    if (grace && !was_guarding) {
+        setUnitAmbientAnime(30.0f, 1.0f, 110.0f, 110.0f, 110.0f);
+    }
+
+    was_guarding = grace;
+    return grace ? std::max(counter, threshold - kGraceFrames) : counter;
+}
+
+void OnHealTick() {
+    if (GuardianGrace()) {
+        setUnitAmbientAnime(60.0f, 1.0f, 70.0f, 70.0f, 70.0f);
     }
 }
 

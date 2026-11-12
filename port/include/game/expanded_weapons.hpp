@@ -357,6 +357,17 @@ void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor);
 void OnAttachmentAdded(int slot);
 
 /**
+ * The Heal ability's frame counter, which ticks at threshold: Guardian Grace keeps it within a
+ * second of the tick while Xiao guards.
+ */
+int HealCounter(int counter, int threshold);
+
+/**
+ * The Heal ability has just given its 1 HP: Guardian Grace's pulse.
+ */
+void OnHealTick();
+
+/**
  * An ability of the weapon item_no has spent base_whp (its cost before Endurance): paid
  * through the game's own wear on the next walking step, if that weapon is still in hand.
  */
