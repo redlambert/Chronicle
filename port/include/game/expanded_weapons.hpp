@@ -172,6 +172,17 @@ float EnemyDefense(float defense, const MONSTOR &monster, int owner);
 void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned);
 
 /**
+ * How close a fish must be to the hook to bite it: 2 units, twice the game's 1, so fish take the
+ * bait more reliably.
+ */
+inline constexpr float kFishBiteReach = 2.0f;
+
+/**
+ * The hour the town music comes back each morning: 9:00, two hours before the game's 11:00.
+ */
+inline constexpr float kTownMusicReturns = 9.0f;
+
+/**
  * The weapon ability bit Confuse takes, past the game's thirteen.
  */
 inline constexpr int kConfuseAbilityBit = 14;

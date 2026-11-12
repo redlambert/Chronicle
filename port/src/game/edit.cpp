@@ -56,6 +56,7 @@
 #include "sound.hpp"
 #include "sysmes.hpp"
 #include "texture.hpp"
+#include "expanded_weapons.hpp"
 
 namespace dc::game {
 
@@ -1171,7 +1172,8 @@ void EdSetBgmVol(float time) {
 
     // The town music plays at night and is silent through the day, fading out
     // over the hour before four.
-    if (EdCheckTime(time, 4.0f, 11.0f) != 0) {
+    // Dark Cloud Expanded: the music comes back at 9:00 instead of 11:00.
+    if (EdCheckTime(time, 4.0f, expanded::kTownMusicReturns) != 0) {
         level = 0.0f;
     }
 

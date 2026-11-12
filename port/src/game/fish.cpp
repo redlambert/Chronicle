@@ -13,6 +13,7 @@
 #include "dataread.hpp"
 #include "gameutil.hpp"
 #include "mathutil.hpp"
+#include "expanded_weapons.hpp"
 
 namespace dc::game {
 
@@ -129,7 +130,8 @@ int CFish::BiteHook() {
         return 0;
     }
 
-    if (DistVector(food_position, position) > 1.0f) {
+    // Dark Cloud Expanded: fish bite from twice as far, so they pull the float down more often.
+    if (DistVector(food_position, position) > expanded::kFishBiteReach) {
         return 0;
     }
 
