@@ -1695,6 +1695,280 @@ bool IceMonster(const MONSTOR &monster) {
     return monster.name_no == 65 || monster.name_no == 85 || monster.name_no == 312;
 }
 
+// ── Confuse ─────────────────────────────────────────────────────────────────────────────────
+
+// A weapon ability beside Poison and Stop: one hit in twenty (never on a boss) confuses the enemy
+// for 20 seconds. A confused enemy goes after whatever is nearest, another enemy or the player,
+// and its blows hurt the enemies they reach. An enemy it hits fights back: it goes after its most
+// recent attacker still confused, then back to the player once none is left. Native to Babel's
+// Spear; a SynthSphere carries it like any other ability.
+constexpr int kConfuseFlag = 1 << kConfuseAbilityBit;
+constexpr int kConfusePercent = 5;
+constexpr int kConfuseSteps = 20 * kStepsPerSecond;
+constexpr int kFriendlyCooldownSteps = kStepsPerSecond / 2;
+constexpr int kFriendlyHitLife = 2;
+constexpr int kHitPoolSize = 96;
+constexpr int kHitPoolReserve = 16;
+constexpr int kConfuseNameMessage = kMessageBase + 1000;
+
+/**
+ * The confused enemies that have hit one enemy, most recent first.
+ */
+struct HitByList {
+    std::array<s8, 16> slot{};
+    int                count = 0;
+};
+
+/**
+ * A hit planted for a confused or provoked enemy's blow, which only the enemies it may hurt take.
+ */
+struct FriendlyHit {
+    int hit = -1;
+    int attacker = -1;
+    int step = -1;
+};
+
+std::array<int, 16>                 g_confused_until{};
+std::array<HitByList, 16>           g_hit_by{};
+std::array<std::array<int, 16>, 16> g_friendly_ready{};
+std::array<FriendlyHit, 32>         g_friendly{};
+int                                 g_friendly_next = 0;
+
+void ConfuseReset() {
+    g_confused_until = {};
+    g_hit_by = {};
+    g_friendly_ready = {};
+    g_friendly = {};
+    g_friendly_next = 0;
+}
+
+bool ActiveMonster(int m) {
+    const MONSTOR &monster = NowMonstorUnit->monster[m];
+    return monster.state == 2 && monster.hp > 0 && monster.revealed != 0;
+}
+
+bool Confused(int m) {
+    return NowMonstorUnit != nullptr && m >= 0 && m < 16 && g_confused_until[m] > g_step_count && ActiveMonster(m);
+}
+
+/**
+ * The confused enemy an enemy that is not confused goes after: its most recent attacker still
+ * confused. -1 for none.
+ */
+int Provoker(int m) {
+    if (NowMonstorUnit == nullptr || m < 0 || m >= 16 || Confused(m) || !ActiveMonster(m)) {
+        return -1;
+    }
+
+    const HitByList &list = g_hit_by[m];
+
+    for (int i = 0; i < list.count; i++) {
+        if (Confused(list.slot[i])) {
+            return list.slot[i];
+        }
+    }
+
+    return -1;
+}
+
+bool Attacks(int m) {
+    return Confused(m) || Provoker(m) >= 0;
+}
+
+/**
+ * Whether attacker's blow may hurt victim: a confused enemy's hurts any other enemy, a provoked
+ * one's only its provoker.
+ */
+bool MayHit(int attacker, int victim) {
+    return attacker != victim && (Confused(attacker) || Provoker(attacker) == victim);
+}
+
+void Provoke(int victim, int attacker) {
+    HitByList &list = g_hit_by[victim];
+    int        kept = 0;
+
+    for (int i = 0; i < list.count; i++) {
+        if (list.slot[i] != attacker) {
+            list.slot[kept++] = list.slot[i];
+        }
+    }
+
+    list.count = kept;
+
+    for (int i = std::min(list.count, 15); i > 0; i--) {
+        list.slot[i] = list.slot[i - 1];
+    }
+
+    list.slot[0] = static_cast<s8>(attacker);
+    list.count = std::min(list.count + 1, 16);
+}
+
+void MonsterPosition(int m, float *out) {
+    NowMonstorUnit->chara[m][0].GetPosition(out);
+}
+
+/**
+ * What a confused enemy goes after: the nearest active enemy on the ground plane, or -1 for the
+ * player when the player is nearer.
+ */
+int ConfusedTarget(int m) {
+    float me[4];
+    MonsterPosition(m, me);
+
+    auto flat = [&me](const float *at) {
+        const float dx = at[0] - me[0];
+        const float dz = at[2] - me[2];
+        return dx * dx + dz * dz;
+    };
+
+    int   best = -1;
+    float best_distance = flat(CharaMain.pos);
+
+    for (int other = 0; other < 16; other++) {
+        if (other == m || !ActiveMonster(other)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(other, at);
+        const float distance = flat(at);
+
+        if (distance < best_distance) {
+            best = other;
+            best_distance = distance;
+        }
+    }
+
+    return best;
+}
+
+/**
+ * The point to go for on victim: its live hit sphere nearest from, else its position. A large
+ * enemy's position is deeper in its body than an attacker's approach reaches.
+ */
+void AimAt(int victim, const float *from, float *out) {
+    MonsterPosition(victim, out);
+
+    const auto &spheres = NowMonstorUnit->effect[victim];
+    float       best = -1.0f;
+
+    for (int sphere = 0; sphere < 16; sphere++) {
+        if (spheres.timer[sphere] == 0) {
+            continue;
+        }
+
+        const float distance = Distance(spheres.position[sphere], from);
+
+        if (best < 0.0f || distance < best) {
+            best = distance;
+            out[0] = spheres.position[sphere][0];
+            out[1] = spheres.position[sphere][1];
+            out[2] = spheres.position[sphere][2];
+        }
+    }
+
+    out[3] = 1.0f;
+}
+
+const FriendlyHit *FindFriendly(int hit) {
+    for (const FriendlyHit &friendly : g_friendly) {
+        if (friendly.hit == hit && friendly.step >= g_step_count - kFriendlyHitLife) {
+            return &friendly;
+        }
+    }
+
+    return nullptr;
+}
+
+/**
+ * The next hit from index from on that reaches a sphere, by CCollisionData::FindMonsterHit's own
+ * rule. -1 for none.
+ */
+int NextMonsterHit(int from, const float *position, float radius) {
+    for (int i = from; i < kHitPoolSize; i++) {
+        const COLLISION_HIT &record = NowColData->hit[i];
+
+        if (NowColData->active[i] != 0 && (record.target_mask & 2) && record.phase == record.ready_phase &&
+            Distance(position, record.pos) <= radius + record.radius) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * Clears the confusion that has run out and forgets the attackers that came to their senses.
+ */
+void ConfuseStep() {
+    if (NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    for (int m = 0; m < 16; m++) {
+        if (g_confused_until[m] != 0 && !Confused(m)) {
+            g_confused_until[m] = 0;
+        }
+    }
+
+    for (HitByList &list : g_hit_by) {
+        int kept = 0;
+
+        for (int i = 0; i < list.count; i++) {
+            if (Confused(list.slot[i])) {
+                list.slot[kept++] = list.slot[i];
+            }
+        }
+
+        list.count = kept;
+    }
+}
+
+// ── Empty SynthSphere ───────────────────────────────────────────────────────────────────────
+
+// An unfilled SynthSphere in a weapon's first hole raises a weapon below +5 to +5, each level
+// gained adding 1 to Attack, Endurance, Speed and Magic. Taken out while the weapon is still +5,
+// the weapon goes back. The levels given are kept in the record's spare byte, so a save keeps
+// them; a level-up makes them the weapon's own.
+constexpr int kSphereLevel = 5;
+
+bool EmptySphere(const ATTACH_LIST &attach) {
+    return attach.item_no == ITEM_ATTACH_SYNTHESIS_SPHERE && attach.sphere_weapon_no == 0;
+}
+
+char &SphereLevels(WEAPON_HAVE *weapon) {
+    return weapon->unk_26[0];
+}
+
+void SphereBoost(WEAPON_HAVE *weapon, int levels) {
+    weapon->level = static_cast<s16>(weapon->level + levels);
+    weapon->attack = static_cast<s16>(weapon->attack + levels);
+    weapon->endurance = static_cast<s16>(weapon->endurance + levels);
+    weapon->speed = static_cast<s16>(weapon->speed + levels);
+    weapon->magic = static_cast<s16>(weapon->magic + levels);
+}
+
+void EmptySphereAttach(WEAPON_HAVE *weapon, int hole) {
+    if (hole != 0 || !EmptySphere(weapon->attach[0]) || weapon->level >= kSphereLevel) {
+        return;
+    }
+
+    const int levels = kSphereLevel - weapon->level;
+    SphereBoost(weapon, levels);
+    SphereLevels(weapon) = static_cast<char>(levels);
+}
+
+void EmptySphereDetach(WEAPON_HAVE *weapon, int hole) {
+    const int levels = SphereLevels(weapon);
+
+    if (hole != 0 || !EmptySphere(weapon->attach[0]) || weapon->level != kSphereLevel || levels <= 0) {
+        return;
+    }
+
+    SphereBoost(weapon, -levels);
+    SphereLevels(weapon) = 0;
+}
+
 } // namespace
 
 // ── Who holds what ──────────────────────────────────────────────────────────────────────────
@@ -2190,6 +2464,7 @@ void DungeonStep() {
 
     // The allies' ongoing effects.
     g_step_count++;
+    ConfuseStep();
     StrideStep();
     TornadoStep();
     TunaStep();
@@ -2417,6 +2692,11 @@ int AbsCap(int max_exp) {
 }
 
 int LevelUpCarry(WEAPON_HAVE *weapon) {
+    // Empty SynthSphere: once the weapon levels up, the levels the sphere gave are its own.
+    if (weapon != nullptr) {
+        SphereLevels(weapon) = 0;
+    }
+
     // Overtraining: what was absorbed past the max carries into the next level.
     if (weapon == nullptr || !Owned(ITEM_WEAPON_MACHO_SWORD)) {
         return 0;
@@ -2506,11 +2786,17 @@ int ScriptRandom(int bound) {
 }
 
 void OnAttach(WEAPON_HAVE *weapon, int hole) {
+    if (weapon == nullptr) {
+        return;
+    }
+
+    EmptySphereAttach(weapon, hole);
+
     // Buster Boost: an anti-monster attachment is worth +4 instead of +3 in a Buster Sword. The
     // attachment's own value changes, so menus, build-up and the level-up absorb all see it.
     constexpr int kStockAnti = 3;
 
-    if (weapon == nullptr || weapon->item_no != ITEM_WEAPON_BUSTER_SWORD || hole < 0 || hole >= 6) {
+    if (weapon->item_no != ITEM_WEAPON_BUSTER_SWORD || hole < 0 || hole >= 6) {
         return;
     }
 
@@ -2528,9 +2814,15 @@ void OnAttach(WEAPON_HAVE *weapon, int hole) {
 }
 
 void OnDetach(WEAPON_HAVE *weapon, int hole) {
+    if (weapon == nullptr) {
+        return;
+    }
+
+    EmptySphereDetach(weapon, hole);
+
     constexpr int kBoostedAnti = 4;
 
-    if (weapon == nullptr || weapon->item_no != ITEM_WEAPON_BUSTER_SWORD || hole < 0 || hole >= 6) {
+    if (weapon->item_no != ITEM_WEAPON_BUSTER_SWORD || hole < 0 || hole >= 6) {
         return;
     }
 
@@ -2545,6 +2837,133 @@ void OnDetach(WEAPON_HAVE *weapon, int hole) {
     if (value == kBoostedAnti) {
         value = kBoostedAnti - 1;
     }
+}
+
+void ConfuseRoll(MONSTOR &monster, int owner, int hit_flags) {
+    if (owner < 0 || NowMonstorUnit == nullptr || monster.kind == MONSTER_KIND_NO_LOCK_ON) {
+        return;
+    }
+
+    // A Babel's Spear from before the port carries no flag of its own until the menus tag it.
+    if ((hit_flags & kConfuseFlag) == 0 && HeldBy(owner) != ITEM_WEAPON_BABEL_S_SPEAR) {
+        return;
+    }
+
+    const int m = static_cast<int>(&monster - NowMonstorUnit->monster);
+
+    if (m < 0 || m >= 16 || std::rand() % 100 >= kConfusePercent) {
+        return;
+    }
+
+    g_confused_until[m] = g_step_count + kConfuseSteps;
+}
+
+bool MonsterTarget(int monster_no, float *target) {
+    if (NowMonstorUnit == nullptr || monster_no < 0 || monster_no >= 16) {
+        return false;
+    }
+
+    const int victim = Confused(monster_no) ? ConfusedTarget(monster_no) : Provoker(monster_no);
+
+    if (victim < 0) {
+        return false;
+    }
+
+    float me[4];
+    MonsterPosition(monster_no, me);
+    AimAt(victim, me, target);
+    return true;
+}
+
+void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
+    if (NowMonstorUnit == nullptr || NowColData == nullptr || damage <= 0 || !Attacks(attacker)) {
+        return;
+    }
+
+    int free_hits = 0;
+
+    for (int i = 0; i < kHitPoolSize; i++) {
+        if (NowColData->active[i] == 0) {
+            free_hits++;
+        }
+    }
+
+    if (free_hits <= kHitPoolReserve) {
+        return;
+    }
+
+    // Nobody's hit: no weapon, no WHP cost, no ailments.
+    float     centre[4] = {at[0], at[1], at[2], 1.0f};
+    const int hit = NowColData->Set(centre, damage, kFriendlyHitLife, radius, 0.0f, 2, 2, 0, 0);
+
+    if (hit < 0) {
+        return;
+    }
+
+    NowColData->hit[hit].weapon_flags = 0;
+    g_friendly[g_friendly_next] = {hit, attacker, g_step_count};
+    g_friendly_next = (g_friendly_next + 1) % static_cast<int>(g_friendly.size());
+}
+
+int MonsterHitFor(int victim, int hit, const float *position, float radius) {
+    while (hit != -1) {
+        const FriendlyHit *friendly = FindFriendly(hit);
+
+        if (friendly == nullptr) {
+            return hit;
+        }
+
+        const int attacker = friendly->attacker;
+
+        if (MayHit(attacker, victim) && g_step_count >= g_friendly_ready[attacker][victim]) {
+            g_friendly_ready[attacker][victim] = g_step_count + kFriendlyCooldownSteps;
+
+            if (Confused(attacker)) {
+                Provoke(victim, attacker);
+            }
+
+            return hit;
+        }
+
+        hit = NextMonsterHit(hit + 1, position, radius);
+    }
+
+    return -1;
+}
+
+int AbilityMessage(int bit) {
+    // The ability names are system messages 70 to 82; 83 is another line, so Confuse takes one of
+    // the mod's own.
+    return bit == kConfuseAbilityBit ? kConfuseNameMessage : bit + 69;
+}
+
+short *SystemText(int line) {
+    if (line != kConfuseNameMessage) {
+        return nullptr;
+    }
+
+    static std::vector<s16> codes;
+
+    if (codes.empty()) {
+        text::GameTextEncode("Confuse", codes);
+    }
+
+    return reinterpret_cast<short *>(codes.data());
+}
+
+void TagAbilities(WEAPON_HAVE *weapon) {
+    if (weapon != nullptr && weapon->item_no == ITEM_WEAPON_BABEL_S_SPEAR) {
+        weapon->flags = static_cast<s16>(weapon->flags | kConfuseFlag);
+    }
+}
+
+int DefaultAbilities(int weapon_no, int flags) {
+    if (weapon_no != ITEM_WEAPON_BABEL_S_SPEAR) {
+        return flags;
+    }
+
+    // 1 means none.
+    return flags == 1 ? kConfuseFlag : flags | kConfuseFlag;
 }
 
 void ShowDungeonMessage(std::string_view text, int frames) {
@@ -3068,6 +3487,7 @@ float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot) {
 }
 
 void OnMonstersLoading() {
+    ConfuseReset();
     g_stolen.Drop();
     g_breath.Drop();
     g_pellets = {};
@@ -3185,6 +3605,7 @@ void OnFloorStart() {
     g_wrath = Wrath::Idle;
     g_whp_bill = 0.0f;
     g_whp_item = -1;
+    ConfuseReset();
 }
 
 } // namespace dc::game::expanded

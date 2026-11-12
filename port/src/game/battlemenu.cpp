@@ -8671,6 +8671,8 @@ void MenuClsMes::NowWeaponStatus(WEAPON_HAVE *selected_weapon) {
     option_count = 0;
 
     if (selected_weapon != nullptr) {
+        // Dark Cloud Expanded: Babel's Spear carries Confuse.
+        expanded::TagAbilities(selected_weapon);
         option_flags = selected_weapon->flags;
 
         for (auto &slot : weapon->attach) {
@@ -8687,9 +8689,10 @@ void MenuClsMes::NowWeaponStatus(WEAPON_HAVE *selected_weapon) {
         int clear_slot = 0;
         int changed = 0;
 
-        for (int bit = 1; bit <= 13; bit++) {
+        // Dark Cloud Expanded: Confuse is bit 14, past the game's thirteen.
+        for (int bit = 1; bit <= expanded::kConfuseAbilityBit; bit++) {
             if (option_flags & (1 << bit)) {
-                int     message_no = bit + 69;
+                int     message_no = expanded::AbilityMessage(bit);
                 ClsMes *window = message;
                 int     index = option_count;
 
@@ -8764,7 +8767,8 @@ void MenuClsMes::Draw1(int x, int y, int draw_alpha) {
                 CRect_i_  icon_src(0xEC, 0x50, 0x14, 0x14);
                 CTexture *face = TexManager.GetTexture("charaface", -1);
 
-                for (option = 1; option <= 13; option++) {
+                // Dark Cloud Expanded: Confuse is bit 14, past the game's thirteen.
+                for (option = 1; option <= expanded::kConfuseAbilityBit; option++) {
                     if (option == 8) {
                         icon_src.x -= icon_src.width;
                     }
@@ -8791,10 +8795,19 @@ void MenuClsMes::Draw1(int x, int y, int draw_alpha) {
                         }
 
                         icon_src.y = icon_src.height * (icon - 1) + 0x50;
+
+                        // Dark Cloud Expanded: Confuse has no icon of its own yet, so it shows Stop's.
+                        CRect_i_ tile = icon_src;
+
+                        if (option == expanded::kConfuseAbilityBit) {
+                            tile.x = 0xEC;
+                            tile.y = icon_src.height * 5 + 0x50;
+                        }
+
                         DrawMenu2DSprite(PerBoardTex, CRect_i_(x, row_y, left.width, left.height), left, alpha);
                         DrawMenu2DSprite(PerBoardTex, CRect_i_(x + left.width, row_y, 100, middle.height), middle, alpha);
                         DrawMenu2DSprite(PerBoardTex, CRect_i_(x + left.width + 100, row_y, right.width, right.height), right, alpha);
-                        DrawMenu2DSprite(face, CRect_i_(x + 2, row_y + 2, 0x14, 0x15), icon_src, alpha);
+                        DrawMenu2DSprite(face, CRect_i_(x + 2, row_y + 2, 0x14, 0x15), tile, alpha);
                         row_y += left.height;
                     }
                 }

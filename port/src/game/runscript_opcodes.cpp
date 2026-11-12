@@ -232,7 +232,10 @@ int _GET_DISTANCE(RS_STACKDATA *stack, int argc) {
     NowMonstorUnit->chara[monster_no][0].GetPosition(monster_position);
 
     if (argc == 1) {
-        sceVu0CopyVector(target_position, CharaMain.pos);
+        // Dark Cloud Expanded: a confused enemy measures to the enemy it is after.
+        if (!expanded::MonsterTarget(monster_no, target_position)) {
+            sceVu0CopyVector(target_position, CharaMain.pos);
+        }
     } else {
         target_position[0] = GetStackFloat(stack++);
         target_position[1] = GetStackFloat(stack++);
@@ -256,7 +259,10 @@ int _GET_POSITION(RS_STACKDATA *stack, int /*argc*/) {
     }
 
     if (target == -2) {
-        sceVu0CopyVector(position, CharaMain.pos);
+        // Dark Cloud Expanded: a confused enemy looks for the enemy it is after.
+        if (!expanded::MonsterTarget(monster_no, position)) {
+            sceVu0CopyVector(position, CharaMain.pos);
+        }
     }
 
     SetStack(stack++, position[0]);

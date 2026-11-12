@@ -1111,6 +1111,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                     int hit = NowColData->Set(effect2[current_monster].position[i], damage, 2, effect2[current_monster].radius[i], 0.0f, 1, effect2[current_monster].kind[i], effect2[current_monster].flags[i], 0);
                     NowColData->SetUserID(current_monster * 5 + 200, i);
 
+                    // Dark Cloud Expanded: a confused enemy's blow can hurt the other enemies.
+                    expanded::OnMonsterAttack(current_monster, effect2[current_monster].position[i], effect2[current_monster].radius[i], damage);
+
                     if (effect2[current_monster].kind[i] == 3) {
                         float angle = effect2[current_monster].angle[i];
 
@@ -1258,6 +1261,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
 
             if (active) {
                 int hit = NowColData->FindMonsterHit(effect[current_monster].position[i], effect[current_monster].radius[i]);
+
+                // Dark Cloud Expanded: past the confused enemies' blows this one may not take.
+                hit = expanded::MonsterHitFor(current_monster, hit, effect[current_monster].position[i], effect[current_monster].radius[i]);
                 int rejected = 0;
 
                 if (hit != -1) {
@@ -1512,6 +1518,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                             immune = 1;
                         }
                     }
+
+                    // Dark Cloud Expanded: the Confuse ability's roll.
+                    expanded::ConfuseRoll(monster[current_monster], owner, effect[current_monster].hit_attributes);
 
                     // Dark Cloud Expanded: what the hitting weapon does as it lands (Snail, Scorpion).
                     expanded::OnEnemyHit(monster[current_monster], owner, monster[current_monster].poison_timer == 180);

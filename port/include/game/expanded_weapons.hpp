@@ -172,6 +172,55 @@ float EnemyDefense(float defense, const MONSTOR &monster, int owner);
 void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned);
 
 /**
+ * The weapon ability bit Confuse takes, past the game's thirteen.
+ */
+inline constexpr int kConfuseAbilityBit = 14;
+
+/**
+ * A hit from owner's weapon has landed on monster with the weapon flags hit_flags: the Confuse
+ * ability's roll.
+ */
+void ConfuseRoll(MONSTOR &monster, int owner, int hit_flags);
+
+/**
+ * Where a monster's "where is the player" asks go while it is confused or provoked: the point to
+ * go for on the enemy it is after, written to target. False when it is after the player.
+ */
+bool MonsterTarget(int monster_no, float *target);
+
+/**
+ * A monster's attack sphere at at is live this step: a confused or provoked one's blow is planted
+ * for the enemies too.
+ */
+void OnMonsterAttack(int attacker, const float *at, float radius, int damage);
+
+/**
+ * The hit victim's sphere at position takes, from the one CCollisionData::FindMonsterHit found:
+ * past the confused enemies' blows it may not take. -1 for none.
+ */
+int MonsterHitFor(int victim, int hit, const float *position, float radius);
+
+/**
+ * The system message that names weapon ability bit in the status window.
+ */
+int AbilityMessage(int bit);
+
+/**
+ * The mod's own system message line, or null where the line is not one.
+ */
+short *SystemText(int line);
+
+/**
+ * Gives a weapon the abilities it carries natively in Expanded (Babel's Spear's Confuse).
+ */
+void TagAbilities(WEAPON_HAVE *weapon);
+
+/**
+ * The ability flags a weapon is built up with: flags, plus what it carries natively.
+ */
+int DefaultAbilities(int weapon_no, int flags);
+
+/**
  * A hit from owner has just taken amount off monster's life (the Cactus's Absorb).
  */
 void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount);

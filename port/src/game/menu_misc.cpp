@@ -1536,6 +1536,12 @@ int CheckWeaponOptionStatus(int options) {
 int IsWeaponOptionGoodOrBad(int option) {
     // Whether each of the fourteen weapon options is a benefit (1) or a drawback (0).
     s16 good_or_bad[14] = {0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1};
+
+    // Dark Cloud Expanded: Confuse is a benefit.
+    if (option == expanded::kConfuseAbilityBit) {
+        return 1;
+    }
+
     return good_or_bad[option];
 }
 
@@ -1546,7 +1552,8 @@ int DefaultWeaponOptionSet(int weapon_no) {
         return 1;
     }
 
-    return data->flags;
+    // Dark Cloud Expanded: Babel's Spear is built up carrying Confuse.
+    return expanded::DefaultAbilities(weapon_no, data->flags);
 }
 
 void WeaponOptionStatusDraw(WEAPON_HAVE *weapon, int x, int y, int alpha) {
@@ -1572,7 +1579,8 @@ void WeaponOptionStatusDraw(WEAPON_HAVE *weapon, int x, int y, int alpha) {
     int      count = 0;
     CRect_i_ source(0xEC, 0x50, 0x14, 0x14);
 
-    for (int bit = 1; bit <= 13; bit++) {
+    // Dark Cloud Expanded: Confuse is bit 14, past the game's thirteen.
+    for (int bit = 1; bit <= expanded::kConfuseAbilityBit; bit++) {
         if (bit == 8) {
             source.x -= source.width;
         }
@@ -1593,7 +1601,16 @@ void WeaponOptionStatusDraw(WEAPON_HAVE *weapon, int x, int y, int alpha) {
             }
 
             source.y = source.height * (row - 1) + 0x50;
-            DrawMenu2DSprite(texture, CRect_i_(draw_x, draw_y, 0x14, 0x15), source, alpha);
+
+            // Dark Cloud Expanded: Confuse has no icon of its own yet, so it shows Stop's.
+            CRect_i_ tile = source;
+
+            if (bit == expanded::kConfuseAbilityBit) {
+                tile.x = 0xEC;
+                tile.y = source.height * 5 + 0x50;
+            }
+
+            DrawMenu2DSprite(texture, CRect_i_(draw_x, draw_y, 0x14, 0x15), tile, alpha);
             draw_x += source.width;
             count++;
 

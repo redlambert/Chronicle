@@ -1078,6 +1078,11 @@ short *ClsMes::GetTextLineDataTop(int line) {
 }
 
 short *ClsMes::GetTextLineDataTop_system(int line) {
+    // Dark Cloud Expanded: the mod's own system lines (the Confuse ability's name).
+    if (short *text = expanded::SystemText(line)) {
+        return text;
+    }
+
     const int count = this->buff_system[0];
     short    *body = &this->buff_system[1];
 
