@@ -14,7 +14,15 @@
 
 </div>
 
-## Overview
+---
+
+## What is this fork?
+
+- In all honesty, I'm just playing around to learn more about switch ports and how to optimize them. I'm being messy about it, learning from mistakes, and this is likely not a fork you want to build from as there will never be comprehensive bug testing.
+
+---
+
+## Original "Chronicle" Overview
 
 **Chronicle** is a decompilation project and port of _Dark Cloud_ for the PlayStation 2.
 
