@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <map>
 #include <format>
 #include <string>
@@ -30,6 +31,7 @@
 #include "menu_inventory.hpp"
 #include "mds.hpp"
 #include "menuetc.hpp"
+#include "mglib.hpp"
 #include "monstorunit.hpp"
 #include "motionmodel.hpp"
 #include "randomitem.hpp"
@@ -124,7 +126,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
     {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
     {ITEM_WEAPON_SWORD_OF_ZEUS, "Guard 1.5 sec; swings\ncall lightning. A long\ncharge: a lunge bolt."},
-    {ITEM_WEAPON_HERCULES_WRATH, "Guard 5 sec: the next\nswing calls a blast\nthrough any guard."},
+    {ITEM_WEAPON_MIRAGE, "Guard briefly: a decoy\nlures foes for 12 sec;\nones you hit turn back."},
+    {ITEM_WEAPON_HERCULES_WRATH, "Guard: an 18 sec decoy.\n5 sec more: a swing\nblasts all around it."},
     {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_ATLAMILLIA_SWORD, "Owned: a weapon that\nbreaks leaves a Synth-\nSphere in a chest."},
     {ITEM_WEAPON_ANGEL_SHOOTER, "Guarding, Heal works\nevery second."},
@@ -888,12 +891,278 @@ void ZeusStep(int held) {
     g_zeus_charge_steps = 0;
 }
 
+// ── Summons: a posed copy of a model, and the lure ──────────────────────────────────────────
+
+bool ActiveMonster(int m);
+
+/**
+ * A still copy of a character's model where it stood when taken: every frame's local pose is
+ * kept, and each draw lays the copy over the live model's own frames, draws it at the copy's
+ * spot and puts the live pose back. The copy is only good while the character keeps the model
+ * it was taken from, so Valid() checks the root frame is the same one.
+ */
+struct PoseCopy {
+    struct FrameSnap {
+        CFrame       *frame;
+        sceVu0FMATRIX local;
+        sceVu0FVECTOR scale;
+        sceVu0FVECTOR position;
+        sceVu0FVECTOR rotation;
+        int           no_rotation;
+        int           rot_type;
+        int           srt;
+    };
+
+    static constexpr int kMaxFrames = 192;
+
+    CCharacter *source = nullptr;
+    CFrame     *root = nullptr;
+    CCharacter *weapon = nullptr;
+    CFrame     *weapon_root = nullptr;
+    int         count = 0;
+    int         weapon_from = 0; // the weapon's frames start here
+    FrameSnap   frames[kMaxFrames];
+    FrameSnap   live[kMaxFrames];
+    float       pos[4] = {};
+    CVector3_f_ rotation{};
+
+    static void Collect(CFrame *frame, FrameSnap *out, int &count) {
+        for (; frame != nullptr && count < kMaxFrames; frame = frame->brother) {
+            Save(frame, out[count++]);
+            Collect(frame->child, out, count);
+        }
+    }
+
+    static void Save(CFrame *frame, FrameSnap &snap) {
+        snap.frame = frame;
+        std::memcpy(snap.local, frame->local, sizeof(snap.local));
+        std::memcpy(snap.scale, frame->scale, sizeof(snap.scale));
+        std::memcpy(snap.position, frame->position, sizeof(snap.position));
+        std::memcpy(snap.rotation, frame->rotation, sizeof(snap.rotation));
+        snap.no_rotation = frame->no_rotation;
+        snap.rot_type = frame->rot_type;
+        snap.srt = frame->srt;
+    }
+
+    static void Load(const FrameSnap &snap) {
+        CFrame *frame = snap.frame;
+        std::memcpy(frame->local, snap.local, sizeof(snap.local));
+        std::memcpy(frame->scale, snap.scale, sizeof(snap.scale));
+        std::memcpy(frame->position, snap.position, sizeof(snap.position));
+        std::memcpy(frame->rotation, snap.rotation, sizeof(snap.rotation));
+        frame->no_rotation = snap.no_rotation;
+        frame->rot_type = snap.rot_type;
+        frame->srt = snap.srt;
+        frame->world_valid = false;
+    }
+
+    void Take(CCharacter &chara, CCharacter *held) {
+        Drop();
+
+        if (chara.frame == nullptr) {
+            return;
+        }
+
+        source = &chara;
+        root = chara.frame;
+        Collect(root, frames, count);
+        weapon_from = count;
+
+        if (held != nullptr && held->frame != nullptr) {
+            weapon = held;
+            weapon_root = held->frame;
+            Collect(weapon_root, frames, count);
+        }
+
+        sceVu0CopyVector(pos, chara.pos);
+        rotation = chara.rotation;
+    }
+
+    void Drop() {
+        source = nullptr;
+        root = nullptr;
+        weapon = nullptr;
+        weapon_root = nullptr;
+        count = 0;
+        weapon_from = 0;
+    }
+
+    bool Valid() const {
+        return source != nullptr && source->frame == root && root != nullptr;
+    }
+
+    /**
+     * Draws the copy with the scene's ambient light at alpha (0 to 1).
+     */
+    void Draw(const float *scene_ambient, float alpha) {
+        if (!Valid() || alpha <= 0.0f) {
+            return;
+        }
+
+        const bool with_weapon = weapon != nullptr && weapon->frame == weapon_root;
+        const int  used = with_weapon ? count : weapon_from;
+
+        for (int i = 0; i < used; i++) {
+            Save(frames[i].frame, live[i]);
+            Load(frames[i]);
+        }
+
+        float       live_pos[4];
+        CVector3_f_ live_rotation = source->rotation;
+        sceVu0CopyVector(live_pos, source->pos);
+        sceVu0CopyVector(source->pos, pos);
+        source->rotation = rotation;
+
+        // The cloth hangs where the live character is, so the copy goes without it.
+        static CCloth *no_cloth[CHARA_CLOTH_MAX] = {};
+        CCloth      **live_cloth = source->cloth;
+        source->cloth = no_cloth;
+
+        const float live_alpha = source->ambient_offset[3];
+        source->ambient_offset[3] = 128.0f * std::min(alpha, 1.0f);
+
+        float ambient[4];
+        sceVu0CopyVector(ambient, const_cast<float *>(scene_ambient));
+        MGSetAmbient(ambient);
+        TexManager.ReloadTexture(Vif1Packet, 0x11);
+        source->Draw();
+
+        if (with_weapon) {
+            TexManager.ReloadTexture(Vif1Packet, 0x1D);
+            weapon->Draw();
+        }
+
+        source->ambient_offset[3] = live_alpha;
+        source->cloth = live_cloth;
+        sceVu0CopyVector(source->pos, live_pos);
+        source->rotation = live_rotation;
+
+        for (int i = 0; i < used; i++) {
+            Load(live[i]);
+        }
+    }
+};
+
+/**
+ * A point the enemies go for in place of the player: every "where is the player" an enemy asks
+ * is answered with it, until that enemy is hurt, which breaks the spell on it for this lure.
+ */
+struct Lure {
+    bool                 active = false;
+    float                pos[4] = {};
+    std::array<bool, 16> broken{};
+
+    void Place(const float *at) {
+        active = true;
+        sceVu0CopyVector(pos, const_cast<float *>(at));
+        broken.fill(false);
+    }
+
+    void Drop() {
+        active = false;
+    }
+
+    bool Pulls(int m) const {
+        return active && m >= 0 && m < 16 && !broken[m] && ActiveMonster(m);
+    }
+};
+
+// ── Mirage "Mirage" ─────────────────────────────────────────────────────────────────────────
+
+// Ungaga's guard held a quarter second flashes him and leaves a still copy of him in the guard
+// pose where he stood. For 12 seconds (18 from Hercules' Wrath) every enemy goes for the copy
+// instead of him; one that is hurt sees through it and turns back to him. A new guard while one
+// stands replaces it. It ends on expiry, a weapon or party change and a new floor. Left out: the
+// heat shimmer, and the dissolve when one copy hands off to the next (it is replaced at once).
+constexpr int   kMirageGuardSteps = 15;
+constexpr int   kMirageSteps = 12 * kStepsPerSecond;
+constexpr int   kMirageHerculesSteps = 18 * kStepsPerSecond;
+constexpr int   kMirageFadeSteps = kStepsPerSecond / 2;
+constexpr float kMirageAlpha = 0.85f;
+
+PoseCopy g_mirage_copy;
+Lure     g_mirage_lure;
+int      g_mirage_steps = 0;      // left to stand
+int      g_mirage_life = 0;       // what it started with
+int      g_mirage_guard = 0;      // steps the guard has been held
+bool     g_mirage_cast = false;   // this guard has cast already
+int      g_mirage_weapon = -1;    // the weapon that cast it
+
+bool MirageLine(int item_no) {
+    return item_no == ITEM_WEAPON_MIRAGE || item_no == ITEM_WEAPON_HERCULES_WRATH;
+}
+
+bool DecoyUp() {
+    return g_mirage_lure.active;
+}
+
+void MirageEnd() {
+    g_mirage_copy.Drop();
+    g_mirage_lure.Drop();
+    g_mirage_steps = 0;
+    g_mirage_weapon = -1;
+}
+
+void MirageReset() {
+    MirageEnd();
+    g_mirage_guard = 0;
+    g_mirage_cast = false;
+}
+
+void MirageCast(int held) {
+    g_mirage_copy.Take(CharaMain, NowWeapon);
+    g_mirage_lure.Place(CharaMain.pos);
+    g_mirage_weapon = held;
+    g_mirage_life = held == ITEM_WEAPON_HERCULES_WRATH ? kMirageHerculesSteps : kMirageSteps;
+    g_mirage_steps = g_mirage_life;
+    setUnitAmbientAnime(15.0f, 1.0f, 255.0f, 230.0f, 160.0f);
+}
+
+void MirageStep() {
+    const int held = HeldBy(CHARA_UNGAGA);
+
+    if (!MirageLine(held)) {
+        if (g_mirage_lure.active || g_mirage_guard != 0) {
+            MirageReset();
+        }
+
+        return;
+    }
+
+    if (g_mirage_lure.active && (held != g_mirage_weapon || !g_mirage_copy.Valid() || --g_mirage_steps <= 0)) {
+        MirageEnd();
+    }
+
+    if (BtActStatus.guard_mode != kGuarding) {
+        g_mirage_guard = 0;
+        g_mirage_cast = false;
+        return;
+    }
+
+    if (!g_mirage_cast && ++g_mirage_guard >= kMirageGuardSteps) {
+        g_mirage_cast = true;
+        MirageCast(held);
+    }
+}
+
+void MirageHurt(const MONSTOR &monster) {
+    if (!g_mirage_lure.active || NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    const int m = static_cast<int>(&monster - NowMonstorUnit->monster);
+
+    if (m >= 0 && m < 16) {
+        g_mirage_lure.broken[m] = true;
+    }
+}
+
 // ── Hercules' Wrath "Air Strike" ────────────────────────────────────────────────────────────
 
 // The guard's second level: held a quarter second (the Mirage's decoy, its first) and five more,
-// it primes, with the charge flash on Ungaga, for as long as Hercules' decoy would stand. The
-// next swing's hit lands Big Bang's blast at the spear tip at twice the reach, through any
-// guard, for 20 WHP.
+// it primes, with the charge flash on Ungaga, for as long as the decoy stands. The next swing's
+// hit lands Big Bang's blast on the decoy, where the enemies gather, at twice the reach, through
+// any guard, for 20 WHP, and the decoy goes with it. With no decoy up it lands at the spear tip.
 constexpr int   kHerculesFirstSteps = 15;
 constexpr int   kHerculesChargeSteps = 5 * kStepsPerSecond;
 constexpr int   kHerculesPrimedSteps = 18 * kStepsPerSecond;
@@ -932,7 +1201,7 @@ void HerculesStep(int held) {
 
             break;
         case Wrath::Primed:
-            if (++g_wrath_steps >= kHerculesPrimedSteps) {
+            if (++g_wrath_steps >= kHerculesPrimedSteps || !DecoyUp()) {
                 g_wrath = Wrath::Idle;
             }
 
@@ -2368,6 +2637,10 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
 void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount) {
     ChronicleSplash(monster, owner, amount);
 
+    if (amount > 0) {
+        MirageHurt(monster);
+    }
+
     // Absorb: the Cactus's hits fill Ungaga's water by a tenth of the damage they deal, ten
     // to a drop, up to his gauge; rock, metal and undead foes give nothing. One hit a step
     // counts, however many it lands.
@@ -2497,6 +2770,7 @@ void DungeonStep() {
     TyphoonStep(held);
     SolarStep(held);
     ZeusStep(held);
+    MirageStep();
     HerculesStep(HeldBy(CHARA_UNGAGA));
     BladeStep(held);
     WiseOwlStep();
@@ -2908,6 +3182,12 @@ void ConfuseRoll(MONSTOR &monster, int owner, int hit_flags) {
 bool MonsterTarget(int monster_no, float *target) {
     if (NowMonstorUnit == nullptr || monster_no < 0 || monster_no >= 16) {
         return false;
+    }
+
+    // The Mirage's decoy outranks confusion, as in Expanded.
+    if (g_mirage_lure.Pulls(monster_no)) {
+        sceVu0CopyVector(target, g_mirage_lure.pos);
+        return true;
     }
 
     const int victim = Confused(monster_no) ? ConfusedTarget(monster_no) : Provoker(monster_no);
@@ -3351,7 +3631,14 @@ void UngagaStrike(const float *tip) {
     }
 
     g_wrath = Wrath::Idle;
-    PlantBlast(tip, 1.0f, true, -1, kHerculesReach);
+
+    if (DecoyUp()) {
+        PlantBlast(g_mirage_lure.pos, 1.0f, true, -1, kHerculesReach);
+        MirageEnd();
+    } else {
+        PlantBlast(tip, 1.0f, true, -1, kHerculesReach);
+    }
+
     DrainWhp(ITEM_WEAPON_HERCULES_WRATH, kHerculesWhp);
     setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
 }
@@ -3659,6 +3946,19 @@ void OnFloorStart() {
     g_whp_item = -1;
     ConfuseReset();
     FloorClearReset();
+    MirageReset();
+}
+
+void DecoyDraw(const float *scene_ambient) {
+    if (!g_mirage_lure.active || UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+        return;
+    }
+
+    // Fades in over its first half second and out over its last.
+    const int   shown = g_mirage_life - g_mirage_steps;
+    const float in = static_cast<float>(shown) / kMirageFadeSteps;
+    const float out = static_cast<float>(g_mirage_steps) / kMirageFadeSteps;
+    g_mirage_copy.Draw(scene_ambient, kMirageAlpha * std::clamp(std::min(in, out), 0.0f, 1.0f));
 }
 
 } // namespace dc::game::expanded

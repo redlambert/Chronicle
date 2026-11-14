@@ -2119,6 +2119,8 @@ void Draw_MainUnit() {
         NowWeapon->Draw();
     }
 
+    expanded::DecoyDraw(saved_ambient); // Dark Cloud Expanded: the Mirage's decoy.
+
     MGSetAmbient(saved_ambient);
     sceVu0CopyMatrix(light, saved_light);
     sceVu0CopyMatrix(colour, saved_colour);

@@ -482,6 +482,12 @@ bool KeepsBait();
 void OnMonstersLoading();
 
 /**
+ * Each draw of the main character, after its weapon, with the scene's ambient light: the
+ * Mirage's decoy, a still copy of Ungaga.
+ */
+void DecoyDraw(const float *scene_ambient);
+
+/**
  * A new floor begins: clears what each effect remembers of the last.
  */
 void OnFloorStart();
