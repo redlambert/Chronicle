@@ -679,6 +679,7 @@ void CMonstorUnit::ArrangementPos(CDungeonMap *map, int count, int model_no, int
     }
 
     SetKey();
+    expanded::OnMonstersPlaced(this); // Dark Cloud Enhanced: minibosses.
 }
 
 void CMonstorUnit::AllBin2() {

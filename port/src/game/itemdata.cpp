@@ -1447,15 +1447,15 @@ ITEM_DATA ITEM_LIST[175] = {
     {ITEM_SORT_POWDER,   0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_NEVER }, /* Hardening Powder */
     {ITEM_SORT_POWDER,   0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_NEVER }, /* Warp Powder */
     {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_NEVER }, /* Stand-in Powder */
-    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_NEVER }, /* Escape Powder */
-    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_SINGLE}, /* Revival Powder */
-    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_NEVER }, /* Repair Powder */
+    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_MULTI }, /* Escape Powder: stacks and goes in a quick-use slot (Dark Cloud Enhanced) */
+    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_MULTI }, /* Revival Powder: stacks and goes in a quick-use slot (Dark Cloud Enhanced) */
+    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_MULTI }, /* Repair Powder: stacks and goes in a quick-use slot (Dark Cloud Enhanced) */
     {ITEM_SORT_POWDER,   0, 0x00000020, 0x0001, 0,   0,  0, ITEM_STACK_NEVER }, /* Powerup Powder */
     {ITEM_SORT_FOOD,     0, 0x00000020, 0x0011, 10,  0,  0, ITEM_STACK_NEVER }, /* Pocket */
     {ITEM_SORT_FOOD,     0, 0x00000060, 0x0011, 10,  0,  0, ITEM_STACK_NEVER }, /* Fruit of Eden */
     {ITEM_SORT_QUEST,    0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_NEVER }, /* Treasure Key */
     {ITEM_SORT_FOOD,     0, 0x000000A0, 0x0011, 10,  0,  0, ITEM_STACK_NEVER }, /* Gourd */
-    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_SINGLE}, /* Auto Repair Powder */
+    {ITEM_SORT_POWDER,   0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_MULTI }, /* Auto Repair Powder: stacks and goes in a quick-use slot (Dark Cloud Enhanced) */
     {ITEM_SORT_NONE,     0, 0x00000000, 0x0000, 0,   0,  0, ITEM_STACK_NEVER }, /* no name */
     {ITEM_SORT_GOODS,    0, 0x00000000, 0x0018, 0,   0,  0, ITEM_STACK_NEVER }, /* Fishing Rod */
     {ITEM_SORT_GOODS,    0, 0x00000000, 0x0001, 0,   0,  0, ITEM_STACK_NEVER }, /* Carrot */

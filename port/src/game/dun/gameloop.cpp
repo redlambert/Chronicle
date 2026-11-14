@@ -1866,6 +1866,15 @@ int GameLoop() {
         case BT_GAME_MODE_ENTRANCE_MENU: {
             int floor = DunEnterMenuLoop();
 
+            // Dark Cloud Enhanced: Circle on the floor select leaves the dungeon, through the
+            // same escape an Escape Powder starts.
+            if (floor == kDunEnterLeave) {
+                BtEventInfo.entrance_result = nullptr;
+                BtGameModeFlag = BT_GAME_MODE_PLAY;
+                gameTask = GAME_TASK_ESCAPE_INIT;
+                break;
+            }
+
             if (floor != -1) {
                 if (BtEventInfo.entrance_result != nullptr) {
                     BtEventInfo.entrance_result->i = floor;

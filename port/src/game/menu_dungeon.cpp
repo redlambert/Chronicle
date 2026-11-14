@@ -631,8 +631,11 @@ int DunEnterMenuKey() {
                 ComMenuSePlay(MENU_SOUND_CONFIRM);
             }
 
+            // Dark Cloud Enhanced: Circle leaves the dungeon for town instead of refusing.
             if (GamePad.Down(PAD_CIRCLE)) {
-                ComMenuSePlay(MENU_SOUND_REFUSE);
+                DEnterMenu.result = kDunEnterLeave;
+                DEnterMenu.state = DUN_ENTER_FADE_OUT;
+                ComMenuSePlay(MENU_SOUND_CONFIRM);
             }
 
             break;

@@ -29,6 +29,7 @@
 #include "dataset.hpp"
 #include "dispctrl.hpp"
 #include "dngmessageman.hpp"
+#include "expanded_weapons.hpp"
 #include "dngstatusdata.hpp"
 #include "dranmapfield.hpp"
 #include "dungeoneventman.hpp"
@@ -912,7 +913,14 @@ void DunMoveChara() {
                                                     }
                                                 }
 
+                                                // Dark Cloud Enhanced: Escape and Repair Powder from a quick-use slot.
+                                                bool powder_used = false;
+
                                                 if (GamePad.Down(PAD_SQUARE) != 0 && BtActStatus.movement_locked == 0 && BtActStatus.action_on == 0 && gameTask != GAME_TASK_UNK_F0 && BtActStatus.can_act != 0) {
+                                                    powder_used = expanded::UseQuickPowder();
+                                                }
+
+                                                if (!powder_used && GamePad.Down(PAD_SQUARE) != 0 && BtActStatus.movement_locked == 0 && BtActStatus.action_on == 0 && gameTask != GAME_TASK_UNK_F0 && BtActStatus.can_act != 0) {
                                                     s16 *slots = UserStatus->active_item;
                                                     int  used = checkItemUsed(itemNowSel - 1);
 

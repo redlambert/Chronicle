@@ -21,6 +21,7 @@
 #include "character.hpp"
 #include "chararead.hpp"
 #include "clsmes.hpp"
+#include "main.hpp"
 #include "collision.hpp"
 #include "dataalloc.hpp"
 #include "dataread.hpp"
@@ -1627,6 +1628,12 @@ void CommandTIME_TABLE(void **arguments) {
  * Stops time progression for the current editor map.
  */
 void CommandTIME_STOP(void ** /*arguments*/) {
+    // Dark Cloud Enhanced: Yellow Drops (23) and Dark Heaven Castle (38, 40) keep their clock
+    // and time of day running, as the other towns do.
+    if (MapNo == 23 || MapNo == 38 || MapNo == 40) {
+        return;
+    }
+
     edit_info->time_stop = true;
 }
 

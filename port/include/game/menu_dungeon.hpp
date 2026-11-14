@@ -40,7 +40,14 @@ int GetAttachVolumeForMsg(ATTACH_LIST *attach);
 int InitDunEnterMenu(int texture_block, int dungeon, int requested_floor);
 
 /**
- * Runs one frame of the dungeon entrance menu, and returns its result once it closes.
+ * The entrance menu's result when the player leaves the dungeon with Circle (Dark Cloud
+ * Enhanced) instead of picking a floor.
+ */
+inline constexpr int kDunEnterLeave = -2;
+
+/**
+ * Runs one frame of the dungeon entrance menu, and returns its result once it closes:
+ * the floor picked, or kDunEnterLeave.
  */
 int DunEnterMenuLoop();
 

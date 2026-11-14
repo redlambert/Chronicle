@@ -17,6 +17,7 @@
 #include "data/data_read.hpp"
 #include "itemdata.hpp"
 #include "menuetc.hpp"
+#include "savedata.hpp"
 #include "shop.hpp"
 #include "text/gametext.hpp"
 
@@ -199,12 +200,97 @@ bool CustomShopActive() {
     return g_open.has_value();
 }
 
+namespace {
+
+// Dark Cloud Enhanced's daily shop slot: seven shops sell one extra item that changes each
+// in-game day, picked from a five-day rotation of tables. Enhanced rolls it at random and keeps
+// it in the save; here it is worked out from the day itself, so it needs no save space and
+// stays the same all day. The item goes where the shop's list ended.
+using DailyTable = std::vector<s16>;
+
+const DailyTable kGems = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106};
+const DailyTable kUseful = {132, 133, 134, 135, 150, 154}; // the four amulets, Stamina Drink, Mighty Healing
+const DailyTable kDbcWeapons = {259, 260, 262, 270, 290, 301, 304};
+const DailyTable kWiseOwlWeapons = {264, 270, 283, 284, 286, 291, 301, 303, 304, 316, 321, 328};
+const DailyTable kShipwreckWeapons = {261, 265, 282, 284, 286, 302, 305, 319, 327, 328, 333, 335, 343};
+const DailyTable kSunMoonWeapons = {263, 272, 282, 288, 293, 306, 318, 334, 337, 344, 349, 350, 359};
+const DailyTable kMoonSeaWeapons = {272, 288, 281, 307, 322, 334, 344, 351, 352, 353};
+const DailyTable kGalleryWeapons = {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375};
+
+struct DailyShop {
+    int                              shop; // index into kRetailGoods
+    int                              slot; // where its list ended
+    std::array<const DailyTable *, 5> rotation;
+};
+
+const DailyTable kGafferDay1 = {181, 181, 224};               // Treasure Chest Key x2, Tram Oil
+const DailyTable kGafferDay3 = {197, 199};                    // Mimi, Prickly
+const DailyTable kWiseOwlDay1 = {186, 188, 189};              // Carrot, Minon, Battan
+const DailyTable kWiseOwlDay4 = {181, 181, 225};              // Treasure Chest Key x2, Sun Dew
+const DailyTable kJokerDay2 = {186, 188, 189, 197, 199};      // Carrot, Minon, Battan, Mimi, Prickly
+const DailyTable kJokerDay4 = {111, 112, 113, 114, 115, 116, 117, 118, 119}; // the buster and slayer attachments
+const DailyTable kJokerDay5 = {181};                          // Treasure Chest Key
+const DailyTable kBrookeDay1 = {132, 133, 134, 135, 150};     // the four amulets, Stamina Drink
+const DailyTable kBrookeDay3 = {181, 181, 228};               // Treasure Chest Key x2, Secret Path Key
+const DailyTable kBrookeDay5 = {169, 186, 188, 189, 193, 197, 199}; // fishing baits
+const DailyTable kLedanDay1 = {181, 181, 229};                // Treasure Chest Key x2, Bravery Launch
+const DailyTable kLedanDay3 = {118, 119};                     // Metal Breaker, Mimic Breaker
+const DailyTable kFairyKingDay2 = {181, 181, 230};            // Treasure Chest Key x2, Flapping Duster
+const DailyTable kFairyKingDay3 = {169, 186, 187, 188, 189, 193, 197, 199}; // fishing baits, Potato Cake
+
+const std::array<DailyShop, 7> kDailyShops = {{
+    {0, 19, {&kGafferDay1, &kGems, &kGafferDay3, &kUseful, &kDbcWeapons}},                   // Gaffer
+    {1, 16, {&kWiseOwlDay1, &kUseful, &kWiseOwlWeapons, &kWiseOwlDay4, &kGems}},            // Wise Owl Forest
+    {8, 12, {&kShipwreckWeapons, &kShipwreckWeapons, &kShipwreckWeapons, &kShipwreckWeapons, &kShipwreckWeapons}}, // Jack
+    {12, 13, {&kGems, &kJokerDay2, &kUseful, &kJokerDay4, &kJokerDay5}},                    // Joker
+    {9, 16, {&kBrookeDay1, &kSunMoonWeapons, &kBrookeDay3, &kGems, &kBrookeDay5}},          // Brooke
+    {10, 15, {&kLedanDay1, &kGems, &kLedanDay3, &kUseful, &kMoonSeaWeapons}},               // Ledan
+    {11, 10, {&kGalleryWeapons, &kFairyKingDay2, &kFairyKingDay3, &kUseful, &kFairyKingDay2}}, // Fairy King
+}};
+
+/**
+ * A fixed pick for a day and shop, spread so neighbouring days and shops differ.
+ */
+int DailyPick(int day, int shop, int size) {
+    std::uint32_t h = static_cast<std::uint32_t>(day) * 0x9E3779B1u ^ static_cast<std::uint32_t>(shop + 1) * 0x85EBCA77u;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 13;
+    return static_cast<int>(h % static_cast<std::uint32_t>(size));
+}
+
+void SetDailyGoods(int shop) {
+    if (SaveData == nullptr) {
+        return;
+    }
+
+    const int day = SaveData->GetDay();
+
+    for (const DailyShop &daily : kDailyShops) {
+        if (daily.shop != shop) {
+            continue;
+        }
+
+        const DailyTable &table = *daily.rotation[((day % 5) + 5) % 5];
+        auto             &goods = kRetailGoods[shop];
+        goods[daily.slot] = table[DailyPick(day, shop, static_cast<int>(table.size()))];
+
+        if (daily.slot + 1 < kShopGoods) {
+            goods[daily.slot + 1] = -1;
+        }
+    }
+}
+
+} // namespace
+
 s16 *PortGetItemShopList(int shop_no) {
     if (g_open) {
         return g_open->goods.data();
     }
     // ShopNoInput lets numbers up to 20 through; retail read past its eighteen lists for them.
-    return kRetailGoods[RetailShop(shop_no)].data();
+    const int shop = RetailShop(shop_no);
+    SetDailyGoods(shop); // Dark Cloud Enhanced: the daily shop slot.
+    return kRetailGoods[shop].data();
 }
 
 void PortItemShopGetPacFileName(int shop_kind, int shop_no, char *file_name) {

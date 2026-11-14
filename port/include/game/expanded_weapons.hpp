@@ -311,6 +311,12 @@ void OnAttach(WEAPON_HAVE *weapon, int hole);
 void OnDetach(WEAPON_HAVE *weapon, int hole);
 
 /**
+ * Square on the selected quick-use item: Escape and Repair Powder's own use (Dark Cloud
+ * Enhanced). True when it was one of them, so the game's own use is skipped.
+ */
+bool UseQuickPowder();
+
+/**
  * Shows text in the dungeon's message window for frames steps.
  */
 void ShowDungeonMessage(std::string_view text, int frames);
@@ -408,6 +414,12 @@ int SkeletonKey(const int *usable);
  * bag: Atlamillia Insurance saves it as a SynthSphere.
  */
 void OnWeaponBroke(const WEAPON_HAVE &weapon);
+
+/**
+ * Every monster of a new floor has been placed and the floor's key handed out: Dark Cloud
+ * Enhanced's miniboss roll.
+ */
+void OnMonstersPlaced(CMonstorUnit *unit);
 
 /**
  * A floor's chests and atla have just been placed (main_floor 0 for its back floor): an insured

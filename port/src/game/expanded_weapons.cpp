@@ -39,6 +39,7 @@
 #include "shot_effect_pack.hpp"
 #include "shot_effect.hpp"
 #include "shot_freefuncs.hpp"
+#include "snd.hpp"
 #include "stockitem.hpp"
 #include "text/gametext.hpp"
 #include "userstatus.hpp"
@@ -3298,6 +3299,56 @@ int DefaultAbilities(int weapon_no, int flags) {
     return flags == 1 ? kConfuseFlag : flags | kConfuseFlag;
 }
 
+bool UseQuickPowder() {
+    // Dark Cloud Enhanced: Escape and Repair Powder work from a quick-use slot. An Escape Powder
+    // asks first and goes on a second press, half a second to three seconds after the first;
+    // a Repair Powder fills the weapon's WHP, and is kept while the weapon is already full.
+    constexpr int kConfirmFrom = kStepsPerSecond / 2;
+    constexpr int kConfirmUntil = 3 * kStepsPerSecond;
+    static int    asked_at = -1;
+
+    if (UserStatus == nullptr || itemNowSel < 1 || itemNowSel > 3) {
+        return false;
+    }
+
+    s16      *slots = UserStatus->active_item;
+    const int item_no = slots[itemNowSel];
+
+    if (slots[itemNowSel + 3] <= 0) {
+        return false;
+    }
+
+    if (item_no == ITEM_ESCAPE_POWDER) {
+        const int since = asked_at < 0 ? -1 : g_step_count - asked_at;
+
+        if (since >= kConfirmFrom && since <= kConfirmUntil) {
+            asked_at = -1;
+            DelActiveItem(itemNowSel);
+            gameTask = GAME_TASK_ESCAPE_INIT;
+        } else if (since < 0 || since > kConfirmUntil) {
+            asked_at = g_step_count;
+            ShowDungeonMessage("Are you sure you want to leave?\nPress Square again to use the Escape Powder.", kConfirmUntil);
+        }
+
+        return true;
+    }
+
+    if (item_no == ITEM_REPAIR_POWDER) {
+        if (NowWeaponHave != nullptr && NowWeaponHave->durability_f < NowWeaponHave->durability) {
+            DelActiveItem(itemNowSel);
+            NowWeaponHave->durability_f = NowWeaponHave->durability;
+            DngMessMan.message = 0xBC;
+            DngMessMan.timer = 0xF0;
+            DngMessMan.steev_window = false;
+            SndSePlay(SE_WEAPON_REPAIR, -1, 0);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 void ShowDungeonMessage(std::string_view text, int frames) {
     // Each line takes a new number, so the window always builds the latest one.
     const int id = g_next_message;
@@ -3707,6 +3758,98 @@ void OnWeaponBroke(const WEAPON_HAVE &weapon) {
     g_insured_notice = insured.floor >= 0
                            ? std::format("Atlamillia Insurance! A SynthSphere\nof it waits on floor {}.", insured.floor + 1)
                            : std::string("Atlamillia Insurance! A SynthSphere\nof it waits on the next floor.");
+}
+
+void OnMonstersPlaced(CMonstorUnit *unit) {
+    // Dark Cloud Enhanced's minibosses: on 30% of floors with more than three regular enemies on
+    // the ground, one of them becomes a champion. It stands 1.5x as large, with 3x the HP, ABS and
+    // money, takes a tenth of the damage of thrown items, and always drops something: 35% the
+    // dungeon's back-floor key, else 15% a weapon from the dungeon's table, else 50% an
+    // attachment (30% of those a gem), else an item (30% of those a better one). One that holds
+    // the floor's key is passed over. Left out: Enhanced's stamina timer change.
+    if (unit == nullptr || UserStatus == nullptr || selectMapNo < 0 || selectMapNo > 6) {
+        return;
+    }
+
+    // Flying enemies, Gemrons, mimics and bosses, by name: Enhanced's list of those that
+    // cannot hold a key.
+    static constexpr std::array<s16, 37> kExcluded = {9, 21, 22, 42, 51, 58, 60, 61, 90, 91, 301, 303, 304, 305, 306, 308, 309, 310, 311,
+                                                      312, 313, 314, 315, 316, 317, 318, 319, 84, 112, 113, 114, 115, 116, 117, 119, 120, -1};
+    static constexpr std::array<s16, 7> kBackFloorKeys = {ITEM_TRAM_OIL, ITEM_SUN_DEW, ITEM_FLAPPING_FISH, ITEM_SECRET_PATH_KEY,
+                                                          ITEM_BRAVERY_LAUNCH, ITEM_FLAPPING_DUSTER, ITEM_CRYSTAL_EYEBALL};
+    static const std::array<std::vector<s16>, 7> kFirstHalf = {{
+        {259, 260, 262, 290},
+        {264, 270, 283, 284, 286, 291, 301, 303, 304},
+        {261, 265, 282, 284, 286, 302, 305, 316, 319, 327, 328},
+        {263, 272, 282, 288, 293, 306, 318, 334, 337, 344},
+        {272, 288, 281, 307, 322, 334, 344, 351, 352, 353},
+        {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375},
+        {276, 273, 275, 281, 285, 309, 311, 323, 325, 340, 338, 355, 359, 370, 371},
+    }};
+    static const std::array<std::vector<s16>, 7> kSecondHalf = {{
+        {259, 260, 262, 270, 290, 301, 304},
+        {264, 270, 283, 284, 286, 291, 301, 303, 304, 316, 321, 328},
+        {261, 265, 282, 284, 286, 302, 305, 319, 327, 328, 333, 335, 343},
+        {263, 272, 282, 288, 293, 306, 318, 334, 337, 344, 349, 350, 359},
+        {272, 288, 281, 307, 322, 334, 344, 351, 352, 353, 365, 374},
+        {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375},
+        {276, 273, 275, 281, 285, 309, 311, 323, 325, 340, 338, 355, 359, 370, 371},
+    }};
+    static constexpr std::array<int, 7> kHalfway = {8, 9, 9, 9, 8, 99, 99};
+    static constexpr std::array<s16, 12> kGems = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106};
+    static constexpr std::array<s16, 19> kAttachments = {81, 82, 83, 84, 85, 91, 92, 93, 94, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120};
+    static constexpr std::array<s16, 3> kGoodItems = {150, 178, 235}; // Stamina Drink, Dran's Feather, Powerup Powder
+    static constexpr std::array<s16, 4> kAmulets = {132, 133, 134, 135};
+
+    auto roll = [](int bound) {
+        return static_cast<int>(static_cast<float>(bound) * static_cast<float>(rand()) / 2147483648.0f);
+    };
+
+    std::vector<int> candidates;
+
+    for (int m = 0; m < 16; m++) {
+        const MONSTOR &monster = unit->monster[m];
+
+        if (monster.state >= 1 && monster.hp > 0 && monster.kind == MONSTER_KIND_NORMAL && monster.drop_item == -1 &&
+            std::ranges::find(kExcluded, monster.name_no) == kExcluded.end()) {
+            candidates.push_back(m);
+        }
+    }
+
+    if (candidates.size() <= 3 || roll(100) > 30) {
+        return;
+    }
+
+    const int m = candidates[roll(static_cast<int>(candidates.size()))];
+    MONSTOR  &boss = unit->monster[m];
+
+    boss.max_hp *= 3;
+    boss.hp = boss.max_hp;
+    boss.exp *= 3;
+    boss.money *= 3;
+    boss.money_chance = 100;
+    boss.item_damage_rate = 10;
+    boss.drops_items = 1;
+
+    for (int i = 0; i <= boss.attachment_count; i++) {
+        CCharacter &part = unit->chara[m][i];
+        part.scale[0] *= 1.5f;
+        part.scale[1] *= 1.5f;
+        part.scale[2] *= 1.5f;
+    }
+
+    const int dungeon = selectMapNo;
+
+    if (roll(100) < 35) {
+        boss.drop_item = kBackFloorKeys[dungeon];
+    } else if (roll(100) < 15) {
+        const auto &table = UserStatus->cur_floor <= kHalfway[dungeon] ? kFirstHalf[dungeon] : kSecondHalf[dungeon];
+        boss.drop_item = table[roll(static_cast<int>(table.size()))];
+    } else if (roll(100) < 50) {
+        boss.drop_item = roll(100) < 30 ? kGems[roll(kGems.size())] : kAttachments[roll(kAttachments.size())];
+    } else {
+        boss.drop_item = roll(100) < 30 ? kGoodItems[roll(kGoodItems.size())] : kAmulets[roll(kAmulets.size())];
+    }
 }
 
 void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor) {
