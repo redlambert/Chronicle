@@ -214,13 +214,14 @@ void DialogNpcSetMessageFile(const char *path) {
     g_message_file_key = path != nullptr && path[0] != '\0' ? LocalizeMessageKey(path) : std::string();
 }
 
-bool DialogNpcOpen(int map_no, int character_info_id, int mes_no) {
+bool DialogNpcOpen(int map_no, int character_info_id, int mes_no, const char *model) {
     Setup();
     NpcContext ctx;
     ctx.map_no = map_no;
     ctx.npc_id = character_info_id;
     ctx.mes_id = mes_no;
     ctx.mes_file_key = g_message_file_key;
+    ctx.model = model != nullptr ? model : "";
     ctx.bubble = BubbleKind::SpeechTail;
     ctx.host_plays_original = true;
     if (!TryInterceptOpen(ctx, {})) {

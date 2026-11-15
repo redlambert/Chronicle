@@ -284,12 +284,15 @@ using Condition = std::function<bool(const Context &)>;
 inline constexpr int kAny = -1;
 
 /**
- * Which NPCs a choice is for: kAny, or an empty key, matches any.
+ * Which NPCs a choice is for: kAny, or an empty key or code, matches any. model_code is the two
+ * digits after the first letter of the villager's town model ("01" for p01a), as Dark Cloud
+ * Enhanced tells its villagers apart.
  */
 struct NpcMatch {
     int         map_no = kAny;
     int         npc_id = kAny;
     std::string mes_file_key;
+    std::string model_code;
 
     bool Matches(const dialog::NpcContext &npc) const;
 };
@@ -453,6 +456,11 @@ void Register(Definition quest);
 void              Clear();
 const Definition *Find(std::string_view id);
 const Progress   *FindProgress(std::string_view id);
+/**
+ * A registered quest's progress to change from outside its conversations (a dungeon's own count
+ * of what the quest asks for); null for a quest not registered. Its stage must stay one of its stages.
+ */
+Progress *EditProgress(std::string_view id);
 
 /**
  * The game quests act on; until it is set, rules and choices do nothing.

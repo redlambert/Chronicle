@@ -44,6 +44,7 @@
 #include "snd.hpp"
 #include "sysmes.hpp"
 #include "texture.hpp"
+#include "quest/enhanced.hpp"
 
 namespace dc::game {
 
@@ -2380,6 +2381,8 @@ void EdMoveChara() {
 
                                 SaveData->AddFishingPoint(fish_points);
                                 SaveData->SetFishingRank(fish_kind, static_cast<float>(size));
+                                // Dark Cloud Enhanced: the fishing quests count the catch.
+                                quest::EnhancedFishCaught(MapNo, fish_kind, size);
                                 fishing_mes++;
                                 EditMes1.mes_no[0] = GetFishMsgNo(fish_kind);
                                 EditMes1.values[0] = size;

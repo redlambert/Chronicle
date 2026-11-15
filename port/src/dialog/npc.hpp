@@ -27,7 +27,7 @@ void DialogNpcSetMessageFile(const char *path);
  * Offers the conversation with villager character_info_id of map map_no, opening on message mes_no:
  * true when the framework took it, which it does only where a provider adds a choice.
  */
-bool DialogNpcOpen(int map_no, int character_info_id, int mes_no);
+bool DialogNpcOpen(int map_no, int character_info_id, int mes_no, const char *model = nullptr);
 
 /**
  * One tick of a conversation DialogNpcOpen took: the pad, then where it stands. While it runs,

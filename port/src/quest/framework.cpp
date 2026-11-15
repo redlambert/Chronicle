@@ -183,7 +183,8 @@ void Scene::OpenShop(ShopSpec shop) {
 
 bool NpcMatch::Matches(const dialog::NpcContext &npc) const {
     return (map_no == kAny || map_no == npc.map_no) && (npc_id == kAny || npc_id == npc.npc_id) &&
-           (mes_file_key.empty() || mes_file_key == npc.mes_file_key);
+           (mes_file_key.empty() || mes_file_key == npc.mes_file_key) &&
+           (model_code.empty() || (npc.model.size() >= 3 && npc.model.compare(1, 2, model_code) == 0));
 }
 
 Condition AtStage(std::string_view stage) {
@@ -359,6 +360,11 @@ const Definition *Find(std::string_view id) {
 
 const Progress *FindProgress(std::string_view id) {
     const Entry *entry = FindEntry(id);
+    return entry != nullptr ? &entry->progress : nullptr;
+}
+
+Progress *EditProgress(std::string_view id) {
+    Entry *entry = FindEntry(id);
     return entry != nullptr ? &entry->progress : nullptr;
 }
 

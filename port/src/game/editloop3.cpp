@@ -9517,7 +9517,14 @@ int EdTalkMode(CCharacter *player, CCameraFollow *camera, int mode, int *selecti
     if (talk_dialog == TalkDialog::Unasked) {
         // The talk script has run: what a quest held back of it can go back to retail.
         QuestHostTalkOpened();
-        talk_dialog = DialogNpcOpen(MapNo, talk_chara_info_id, TalkMesNo) ? TalkDialog::Open : TalkDialog::Retail;
+        // The villager's model goes along too: Dark Cloud Enhanced's quests know their villagers by it.
+        const char *model = talk_villager__2 != nullptr ? talk_villager__2->resource_name : "";
+
+        if (model[0] == '\0' && talk_chara_info_id >= 0 && talk_chara_info_id < 16) {
+            model = EdEventInfo.villagers[talk_chara_info_id].name;
+        }
+
+        talk_dialog = DialogNpcOpen(MapNo, talk_chara_info_id, TalkMesNo, model) ? TalkDialog::Open : TalkDialog::Retail;
     }
 
     if (talk_dialog == TalkDialog::Open) {

@@ -10,6 +10,8 @@ const NpcMatch &NoruneMayor() {
 void RegisterAllQuests() {
     Register(MayorSupplies());
     Register(CarlsSlingshot());
+    // Dark Cloud Enhanced
+    RegisterEnhancedQuests();
 }
 
 std::vector<std::pair<std::string, std::string>> QuestStrings() {
@@ -18,6 +20,9 @@ std::vector<std::pair<std::string, std::string>> QuestStrings() {
         for (const Text &text : texts) {
             out.emplace_back(text.key, text.english);
         }
+    }
+    for (const Text &text : EnhancedQuestsTexts()) {
+        out.emplace_back(text.key, text.english);
     }
     return out;
 }

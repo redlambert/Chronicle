@@ -41,6 +41,7 @@ struct NpcContext {
     int32_t     npc_id = -1;
     int32_t     mes_id = -1;
     std::string mes_file_key;
+    std::string model;            /**< The villager's town model ("p01a"), or empty where it is not known. */
     std::string hub_greeting_key; /**< A line above the NPC's menu (a key, as ResolveKey takes one); empty for the choices alone. */
     BubbleKind  bubble = BubbleKind::SpeechTail;
     bool        has_anchor = false;          /**< Whether anchor_x/anchor_y place the window, rather than the screen's bottom. */

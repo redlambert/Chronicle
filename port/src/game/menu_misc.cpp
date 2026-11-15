@@ -48,6 +48,7 @@
 #include "weapon_buildup.hpp"
 #include "weaponeffect.hpp"
 #include "weaponlevelup.hpp"
+#include "quest/enhanced.hpp"
 
 namespace dc::game {
 
@@ -276,6 +277,11 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
                     case ITEM_FRUIT_OF_EDEN: {
                         s16 limit[6] = {0xAA, 0x8C, 0xAA, 0x8C, 0xB4, 0xA0};
 
+                        // Dark Cloud Enhanced: the Mayor's bonus quests raise every limit to 250.
+                        for (s16 &each : limit) {
+                            each = static_cast<s16>(quest::EnhancedEdenLimit(each));
+                        }
+
                         if ((old_condition & AILMENT_KNOCKED_OUT) || now_hp <= 0 || !(static_cast<s16>(max_hp) < limit[chara])) {
                             used = 0;
                         } else {
@@ -294,7 +300,8 @@ int ItemUseFunc(CUserStatus *status, int item_no, int chara, int target, WEAPON_
                         break;
                     }
                     case ITEM_GOURD:
-                        if (max_water <= 90.0f) {
+                        // Dark Cloud Enhanced: the Mayor's bonus quests let the gauge reach 12 drops.
+                        if (max_water <= quest::EnhancedGourdLimit()) {
                             float next = max_water + (&data->vol)[value_no];
                             status->water_max[chara] = next;
                             status->water_now[chara] = next;

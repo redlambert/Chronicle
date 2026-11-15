@@ -44,6 +44,7 @@
 #include "texture.hpp"
 #include "userstatus.hpp"
 #include "weaponelement.hpp"
+#include "quest/enhanced.hpp"
 
 namespace dc::game {
 
@@ -2247,6 +2248,9 @@ void CMonstorUnit::Step(int pause) {
                     SoundCheck();
 
                     if (monster[current_monster].state == -1) {
+                        // Dark Cloud Enhanced: the monster hunts count every monster down.
+                        quest::EnhancedMonsterDown(monster[current_monster]);
+
                         auto        *status = static_cast<CDngStatusData *>(UserStatus);
                         int          current_chara = UserStatus->cur_chara;
                         WEAPON_HAVE *weapon = &status->chara_weapons[current_chara][status->equipped_weapon_slot[current_chara]];

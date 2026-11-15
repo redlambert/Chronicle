@@ -49,6 +49,17 @@ Definition CarlsSlingshot();
 std::span<const Text> CarlsSlingshotTexts();
 
 /**
+ * Registers Dark Cloud Enhanced's quests (enhanced_quests.cpp): the monster hunts, fishing quests,
+ * rumours, Samba's challenge, the crystal puzzle, Pickle's collection and the Mayor's bonus quests.
+ */
+void RegisterEnhancedQuests();
+
+/**
+ * Lists the Enhanced quests' localization text.
+ */
+std::vector<Text> EnhancedQuestsTexts();
+
+/**
  * Registers every quest above, in the order their choices appear in an NPC's menu.
  */
 void RegisterAllQuests();

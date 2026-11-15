@@ -44,6 +44,7 @@
 #include "stockitem.hpp"
 #include "text/gametext.hpp"
 #include "userstatus.hpp"
+#include "quest/enhanced.hpp"
 
 namespace dc::game::expanded {
 
@@ -2842,6 +2843,8 @@ void DungeonStep() {
     ConfuseStep();
     FloorClearStep();
     StrideStep();
+    // Dark Cloud Enhanced: Samba's and the Mayor's floor challenges.
+    quest::EnhancedDungeonStep();
     TornadoStep();
     TunaStep();
 }
@@ -3965,6 +3968,20 @@ void RandomizeChests(CDungeonMap *map, int floor_no, int main_floor) {
         }
     }
 
+    // A rumour's item (Laura's, Ro's...) waits in the back floor's first small chest when its roll
+    // comes up and the player has none yet.
+    if (main_floor == 0) {
+        const int quest_item = quest::EnhancedBackFloorItem(dungeon);
+
+        for (TREASURE_BOX &box : map->boxes) {
+            if (quest_item >= 0 && box.used != 0 && box.kind == TREASURE_BOX_SMALL) {
+                box.item_no = quest_item;
+                box.trap_no = 0;
+                break;
+            }
+        }
+    }
+
     // The floor's build clears both flags after this, so the floor's first step sets them.
     if (main_floor != 0) {
         g_carried_map = has_map;
@@ -4349,6 +4366,7 @@ void OnFloorStart() {
     ConfuseReset();
     FloorClearReset();
     MirageReset();
+    quest::EnhancedFloorStart();
 }
 
 void DecoyDraw(const float *scene_ambient) {
