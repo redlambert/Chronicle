@@ -20,6 +20,7 @@
 #include "editloop.hpp"
 #include "editmenu.hpp"
 #include "editpartsdata.hpp"
+#include "expanded_weapons.hpp"
 #include "frame.hpp"
 #include "itemdata.hpp"
 #include "mglib.hpp"
@@ -1658,6 +1659,11 @@ float QuarterTurnAngle(float turn) {
 } // namespace
 
 void GetPieroItem(int map_no, int ura_dungeon, int *item0, int *item1) {
+    // Dark Cloud Enhanced: clown randomizer.
+    if (expanded::PieroItems(map_no, UserStatus->cur_floor, item0, item1)) {
+        return;
+    }
+
     const PIERO_ITEM_SET *list = PieroItemListPtr[map_no + ura_dungeon * 7];
     const s16            *rate = ItemSetRateTbl[map_no];
     const PIERO_ITEM_SET &set = UserStatus->cur_floor < floorNum[map_no] ? list[0] : list[1];

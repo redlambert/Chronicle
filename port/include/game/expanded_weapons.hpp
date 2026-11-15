@@ -422,8 +422,14 @@ void OnWeaponBroke(const WEAPON_HAVE &weapon);
 void OnMonstersPlaced(CMonstorUnit *unit);
 
 /**
- * A floor's chests and atla have just been placed (main_floor 0 for its back floor): an insured
- * SynthSphere's chest joins them.
+ * Enhanced's clown: picks the two boxes' items for a floor of a dungeon. Returns false to leave
+ * them to the game.
+ */
+bool PieroItems(int map_no, int floor_no, int *item0, int *item1);
+
+/**
+ * A floor's chests and atla have just been placed (main_floor 0 for its back floor): Enhanced's
+ * chest randomizer rerolls them, then an insured SynthSphere's chest joins them.
  */
 void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor);
 

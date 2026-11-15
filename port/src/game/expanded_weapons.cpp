@@ -30,6 +30,7 @@
 #include "mainselect.hpp"
 #include "menu_inventory.hpp"
 #include "mds.hpp"
+#include "menu_save.hpp"
 #include "menuetc.hpp"
 #include "mglib.hpp"
 #include "monstorunit.hpp"
@@ -132,6 +133,8 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_ATLAMILLIA_SWORD, "Owned: a weapon that\nbreaks leaves a Synth-\nSphere in a chest."},
     {ITEM_WEAPON_ANGEL_SHOOTER, "Guarding, Heal works\nevery second."},
+    {ITEM_WEAPON_ANGE_GEAR, "Mends the party 1 HP\nevery 5 s. Guarding,\nHeal works each second."},
+    {ITEM_WEAPON_BABEL_S_SPEAR, "Hits may stop every\nenemy on the floor\nfor 5 seconds."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -1453,6 +1456,39 @@ bool  g_tuna_healing = false;
 float g_tuna_last_whp = -1.0f;
 int   g_tuna_last_hp = -1;
 int   g_tuna_rolled_step = -1;
+int   g_babel_rolled_step = -1;
+
+// Dark Cloud Enhanced's Angel Gear: while Xiao is out with it, every five seconds the whole party
+// regains 1 HP, the knocked out excepted. Xiao herself only when its Heal is not live, which
+// already mends her.
+int g_angel_steps = 0;
+
+void AngelGearStep() {
+    constexpr int kAngelSteps = 5 * kStepsPerSecond;
+
+    if (UserStatus->cur_chara != CHARA_XIAO || HeldBy(CHARA_XIAO) != ITEM_WEAPON_ANGE_GEAR || NowWeaponHave == nullptr) {
+        g_angel_steps = 0;
+        return;
+    }
+
+    if (++g_angel_steps < kAngelSteps) {
+        return;
+    }
+
+    g_angel_steps = 0;
+
+    const bool heal_live = (NowWeaponHave->flags & 0x800) != 0;
+
+    for (int chara = 0; chara < 6; chara++) {
+        if (chara == CHARA_XIAO && heal_live) {
+            continue;
+        }
+
+        if (UserStatus->hp[chara] > 0 && UserStatus->hp[chara] < UserStatus->max_hp[chara]) {
+            UserStatus->hp[chara]++;
+        }
+    }
+}
 
 void TunaReset() {
     g_tuna_bank = 0.0f;
@@ -2622,6 +2658,23 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
         }
     }
 
+    // Dark Cloud Enhanced's Babel's Spear: one hit in about seventeen stops every enemy on the
+    // floor for five seconds. One roll a step, however many it hits; bosses are left out.
+    constexpr int kBabelPercent = 6;
+    constexpr int kBabelFrames = 300;
+
+    if (held == ITEM_WEAPON_BABEL_S_SPEAR && NowMonstorUnit != nullptr && g_babel_rolled_step != g_step_count) {
+        g_babel_rolled_step = g_step_count;
+
+        if (std::rand() % 100 < kBabelPercent) {
+            for (MONSTOR &other : NowMonstorUnit->monster) {
+                if (other.state == 2 && other.kind == MONSTER_KIND_NORMAL) {
+                    other.stop_timer = std::max<int>(other.stop_timer, kBabelFrames);
+                }
+            }
+        }
+    }
+
     // Scorpion: when its poison takes hold, Ungaga's own poison is drawn out and the weapon
     // soaks up half the enemy's ABS.
     if (held == ITEM_WEAPON_SCORPION && poisoned && NowWeaponHave != nullptr) {
@@ -2776,6 +2829,7 @@ void DungeonStep() {
     BladeStep(held);
     WiseOwlStep();
     WhpStep();
+    AngelGearStep();
 
     // Atlamillia Insurance's notice, once the game's own break message has gone.
     if (!g_insured_notice.empty() && DngMessMan.timer <= 0) {
@@ -3760,23 +3814,17 @@ void OnWeaponBroke(const WEAPON_HAVE &weapon) {
                            : std::string("Atlamillia Insurance! A SynthSphere\nof it waits on the next floor.");
 }
 
-void OnMonstersPlaced(CMonstorUnit *unit) {
-    // Dark Cloud Enhanced's minibosses: on 30% of floors with more than three regular enemies on
-    // the ground, one of them becomes a champion. It stands 1.5x as large, with 3x the HP, ABS and
-    // money, takes a tenth of the damage of thrown items, and always drops something: 35% the
-    // dungeon's back-floor key, else 15% a weapon from the dungeon's table, else 50% an
-    // attachment (30% of those a gem), else an item (30% of those a better one). One that holds
-    // the floor's key is passed over. Left out: Enhanced's stamina timer change.
-    if (unit == nullptr || UserStatus == nullptr || selectMapNo < 0 || selectMapNo > 6) {
-        return;
-    }
+namespace {
 
-    // Flying enemies, Gemrons, mimics and bosses, by name: Enhanced's list of those that
-    // cannot hold a key.
-    static constexpr std::array<s16, 37> kExcluded = {9, 21, 22, 42, 51, 58, 60, 61, 90, 91, 301, 303, 304, 305, 306, 308, 309, 310, 311,
-                                                      312, 313, 314, 315, 316, 317, 318, 319, 84, 112, 113, 114, 115, 116, 117, 119, 120, -1};
-    static constexpr std::array<s16, 7> kBackFloorKeys = {ITEM_TRAM_OIL, ITEM_SUN_DEW, ITEM_FLAPPING_FISH, ITEM_SECRET_PATH_KEY,
-                                                          ITEM_BRAVERY_LAUNCH, ITEM_FLAPPING_DUSTER, ITEM_CRYSTAL_EYEBALL};
+// The floor numbers past which Enhanced swaps to a dungeon's second-half tables.
+bool SecondHalf(int dungeon, int floor) {
+    static constexpr std::array<int, 7> kHalfway = {8, 9, 9, 9, 8, 99, 99};
+    return floor > kHalfway[dungeon];
+}
+
+// Dark Cloud Enhanced's weapon table of each dungeon, by its floors before and after the
+// halfway point; the chests, the clown and the minibosses all draw from it.
+const std::vector<s16> &DungeonWeapons(int dungeon, int floor) {
     static const std::array<std::vector<s16>, 7> kFirstHalf = {{
         {259, 260, 262, 290},
         {264, 270, 283, 284, 286, 291, 301, 303, 304},
@@ -3795,7 +3843,199 @@ void OnMonstersPlaced(CMonstorUnit *unit) {
         {274, 281, 285, 292, 294, 308, 322, 336, 338, 339, 354, 360, 368, 375},
         {276, 273, 275, 281, 285, 309, 311, 323, 325, 340, 338, 355, 359, 370, 371},
     }};
-    static constexpr std::array<int, 7> kHalfway = {8, 9, 9, 9, 8, 99, 99};
+
+    return SecondHalf(dungeon, floor) ? kSecondHalf[dungeon] : kFirstHalf[dungeon];
+}
+
+int Roll(int bound) {
+    return static_cast<int>(static_cast<float>(bound) * static_cast<float>(rand()) / 2147483648.0f);
+}
+
+template <typename T>
+int Pick(const T &table) {
+    return table[Roll(static_cast<int>(std::size(table)))];
+}
+
+// Enhanced sends more weapons out of the chests and the clown once Chronicle 2 is in hand.
+bool HasChronicle2() {
+    return PlayerAllItemCheck(ITEM_WEAPON_CHRONICLE2) != 0;
+}
+
+// A Map or Magical Crystal carried in the bag stands in for the floor's own.
+bool g_carried_map = false;
+bool g_carried_crystal = false;
+
+bool CarriesItem(int item_no) {
+    if (SaveData == nullptr) {
+        return false;
+    }
+
+    const auto &pack = SaveData->GetDngStatus()->item_pack.item;
+    return std::ranges::find(pack, item_no) != std::end(pack);
+}
+
+void RandomizeChests(CDungeonMap *map, int floor_no, int main_floor) {
+    // Dark Cloud Enhanced's chest randomizer: every chest of the floor is rerolled from Enhanced's
+    // own tables. A small chest takes an item from the dungeon's list (the back floor's from one
+    // list shared by all dungeons), a large one a weapon from the dungeon's table with a random
+    // trap. Large chests come 12% of the time in the Divine Beast Cave, 1.5 points fewer each
+    // dungeon after, and twice as often once Chronicle 2 is in hand. Powerup Powder is rerolled
+    // 4 times in 5 (on the main floors only until Chronicle 2). The Map and Magical Crystal
+    // chests are left alone unless one is carried in the bag, which then lights the floor's.
+    static const std::array<std::vector<s16>, 7> kFirstHalfItems = {{
+        {145, 146, 147, 148, 148, 155, 149, 159, 181, 178, 150, 151, 151, 224, 199, 197, 186, 187, 188, 189, 190, 152, 153, 177, 177, 177, 174, 224, 155,
+         175, 177, 175, 174, 91, 92, 93, 94, 81, 82, 83, 84, 85, 112, 117, 114, 224, 135, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170},
+        {177, 177, 175, 176, 174, 181, 178, 148, 155, 149, 145, 146, 147, 159, 199, 197, 186, 187, 188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81,
+         82, 83, 84, 85, 160, 160, 225, 225, 150, 178, 225, 225, 225, 225, 150, 151, 151, 152, 153, 154, 132, 133, 134, 135, 235, 166, 167, 168, 169, 170, 148},
+        {177, 177, 175, 176, 174, 178, 181, 235, 148, 155, 149, 145, 146, 147, 159, 150, 151, 151, 152, 153, 166, 167, 168, 169, 170, 154, 199, 197, 193,
+         186, 187, 188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81, 82, 83, 84, 85, 226, 226, 245, 132, 133, 134, 135, 148},
+        {177, 177, 175, 176, 174, 181, 178, 235, 228, 155, 149, 145, 146, 147, 159, 150, 151, 228, 152, 153, 166, 167, 168, 169, 170, 154, 199, 197, 193,
+         186, 187, 188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81, 82, 83, 84, 85, 228, 132, 133, 134, 135},
+        {177, 177, 175, 176, 174, 181, 178, 235, 229, 155, 149, 145, 146, 147, 159, 150, 151, 229, 152, 153, 166, 167, 168, 169, 170, 154, 199, 197, 193,
+         186, 187, 188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81, 82, 83, 84, 85, 229, 132, 133, 134, 135},
+        {177, 177, 175, 176, 174, 181, 178, 235, 155, 149, 145, 146, 147, 159, 150, 151, 230, 152, 153, 166, 167, 168, 169, 170, 154, 199, 197, 193, 186,
+         187, 188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81, 82, 83, 84, 85, 230, 132, 133, 134, 135, 230},
+        {177, 177, 175, 176, 174, 231, 178, 235, 155, 149, 145, 146, 147, 159, 150, 231, 151, 152, 153, 166, 167, 168, 169, 170, 154, 199, 197, 193, 186,
+         187, 188, 189, 190, 161, 162, 163, 164, 165, 231, 231, 231, 94, 81, 82, 83, 84, 85, 91, 132, 133, 134, 135},
+    }};
+    // Only the Divine Beast Cave and Wise Owl Forest have second-half lists of their own.
+    static const std::vector<s16> kOwlSecondHalf = {177, 177, 175, 176, 174, 181, 178, 148, 155, 149, 145, 146, 147, 159, 199, 197, 186, 187,
+                                                    188, 189, 190, 161, 162, 163, 164, 165, 91, 92, 93, 94, 81, 82, 83, 84, 85, 150, 178, 225,
+                                                    225, 225, 225, 150, 151, 151, 152, 153, 154, 132, 133, 134, 135, 235, 166, 167, 168, 169,
+                                                    170, 148};
+    static const std::vector<s16> kCaveSecondHalf = {145, 146, 147, 148, 148, 155, 149, 159, 181, 178, 150, 151, 151, 224, 199, 197, 186, 187, 188,
+                                                     189, 190, 152, 153, 177, 177, 224, 174, 176, 155, 175, 91, 92, 93, 94, 81, 82, 83, 84, 85, 111,
+                                                     119, 120, 224, 135, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170};
+    static constexpr std::array<s16, 52> kBackFloorItems = {91, 92, 93, 94, 81, 82, 83, 84, 85, 95, 96, 97, 98, 99, 100, 101, 102, 103,
+                                                            104, 105, 106, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 161, 162, 163,
+                                                            164, 165, 150, 151, 152, 153, 154, 132, 133, 134, 135, 235, 166, 167, 168, 169,
+                                                            170, 178};
+
+    if (map == nullptr || selectMapNo < 0 || selectMapNo > 6) {
+        return;
+    }
+
+    const int  dungeon = selectMapNo;
+    const bool chronicle2 = HasChronicle2();
+    const bool has_map = CarriesItem(ITEM_MAP);
+    const bool has_crystal = CarriesItem(ITEM_MAGICAL_CRYSTAL);
+
+    std::vector<s16> items = kFirstHalfItems[dungeon];
+
+    if (SecondHalf(dungeon, floor_no) && dungeon <= 1) {
+        items = dungeon == 0 ? kCaveSecondHalf : kOwlSecondHalf;
+    }
+
+    // Past the Demon Shaft's 50th floor its Crystal Eyeballs give way to Auto Repair Powder.
+    if (dungeon == 6 && floor_no >= 49) {
+        items[5] = 181;
+    }
+
+    const std::vector<s16> &weapons = DungeonWeapons(dungeon, floor_no);
+
+    int item_chance = 880 + 15 * dungeon;
+
+    if (chronicle2) {
+        item_chance -= 1000 - item_chance;
+    }
+
+    for (TREASURE_BOX &box : map->boxes) {
+        if (box.used == 0) {
+            continue;
+        }
+
+        if ((box.item_no == ITEM_MAP && !has_map) || (box.item_no == ITEM_MAGICAL_CRYSTAL && !has_crystal)) {
+            continue;
+        }
+
+        if (Roll(1000) < item_chance) {
+            int item_no = main_floor != 0 ? Pick(items) : Pick(kBackFloorItems);
+
+            if (item_no == ITEM_POWERUP_POWDER && (main_floor == 0 || !chronicle2) && Roll(100) < 80) {
+                item_no = main_floor != 0 ? Pick(items) : Pick(kBackFloorItems);
+            }
+
+            box.item_no = item_no;
+            box.kind = TREASURE_BOX_SMALL;
+            box.trap_no = 0;
+        } else {
+            box.item_no = Pick(weapons);
+            box.kind = TREASURE_BOX_LARGE;
+            box.trap_no = Roll(6);
+        }
+    }
+
+    // The floor's build clears both flags after this, so the floor's first step sets them.
+    if (main_floor != 0) {
+        g_carried_map = has_map;
+        g_carried_crystal = has_crystal;
+    }
+}
+
+} // namespace
+
+bool PieroItems(int map_no, int floor_no, int *item0, int *item1) {
+    // Dark Cloud Enhanced's clown: each box holds one item, drawn half the time (always, once
+    // Chronicle 2 is in hand) from the dungeon's clown weapons, else from the common lists. The
+    // back floor's clown offers the same as its main floor's.
+    static const std::array<std::array<std::vector<s16>, 2>, 7> kBig = {{
+        {{{264, 270, 283, 291}, {264, 283, 291}}},
+        {{{261, 265, 286}, {261, 265, 286, 319, 320, 327}}},
+        {{{263, 288, 293, 318, 327}, {263, 288, 293, 318, 327}}},
+        {{{272, 288, 322}, {272, 288, 322, 351, 352, 353}}},
+        {{{274, 285, 292, 294, 323, 354, 360}, {274, 285, 292, 294, 323, 354, 360}}},
+        {{{276, 273, 294, 285, 323, 355}, {276, 273, 294, 285, 323, 355}}},
+        {{{295, 296, 297, 324, 356, 357}, {295, 296, 297, 324, 356, 357}}},
+    }};
+    static const std::array<std::array<std::vector<s16>, 2>, 7> kSmall = {{
+        {{{}, {303, 303}}},
+        {{{302, 305}, {302, 305}}},
+        {{{302, 306}, {302, 306, 334, 337, 344}}},
+        {{{307, 334, 344}, {307, 334, 344}}},
+        {{{308, 312, 336, 338, 339}, {308, 312, 336, 338, 339, 368, 375}}},
+        {{{312, 336, 338, 339, 369, 370, 371}, {312, 336, 338, 339, 369, 370, 371}}},
+        {{{309, 340, 341, 372, 373}, {309, 340, 341, 372, 373}}},
+    }};
+    static constexpr std::array<s16, 9> kCommonBig = {148, 155, 149, 146, 147, 132, 133, 134, 135};
+    // The last entry is the dungeon's own back-floor key.
+    static constexpr std::array<s16, 7> kDungeonKey = {224, 225, 226, 228, 229, 230, 230};
+
+    if (map_no < 0 || map_no > 6 || item0 == nullptr || item1 == nullptr) {
+        return false;
+    }
+
+    std::array<s16, 24> common_small = {91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 186, 187, 188, 189, 190, 197, 199, 224};
+    common_small[23] = kDungeonKey[map_no];
+
+    const int  half = SecondHalf(map_no, floor_no) ? 1 : 0;
+    const int  lucky_chance = HasChronicle2() ? 0 : 50;
+    const auto &big = kBig[map_no][half];
+    const auto &small = kSmall[map_no][half];
+
+    *item0 = Roll(100) >= lucky_chance ? Pick(big) : Pick(kCommonBig);
+
+    // The Divine Beast Cave's first half has no clown weapons for the small box.
+    *item1 = Roll(100) >= lucky_chance && !small.empty() ? Pick(small) : Pick(common_small);
+    return true;
+}
+
+void OnMonstersPlaced(CMonstorUnit *unit) {
+    // Dark Cloud Enhanced's minibosses: on 30% of floors with more than three regular enemies on
+    // the ground, one of them becomes a champion. It stands 1.5x as large, with 3x the HP, ABS and
+    // money, takes a tenth of the damage of thrown items, and always drops something: 35% the
+    // dungeon's back-floor key, else 15% a weapon from the dungeon's table, else 50% an
+    // attachment (30% of those a gem), else an item (30% of those a better one). One that holds
+    // the floor's key is passed over. Left out: Enhanced's stamina timer change.
+    if (unit == nullptr || UserStatus == nullptr || selectMapNo < 0 || selectMapNo > 6) {
+        return;
+    }
+
+    // Flying enemies, Gemrons, mimics and bosses, by name: Enhanced's list of those that
+    // cannot hold a key.
+    static constexpr std::array<s16, 37> kExcluded = {9, 21, 22, 42, 51, 58, 60, 61, 90, 91, 301, 303, 304, 305, 306, 308, 309, 310, 311,
+                                                      312, 313, 314, 315, 316, 317, 318, 319, 84, 112, 113, 114, 115, 116, 117, 119, 120, -1};
+    static constexpr std::array<s16, 7> kBackFloorKeys = {ITEM_TRAM_OIL, ITEM_SUN_DEW, ITEM_FLAPPING_FISH, ITEM_SECRET_PATH_KEY,
+                                                          ITEM_BRAVERY_LAUNCH, ITEM_FLAPPING_DUSTER, ITEM_CRYSTAL_EYEBALL};
     static constexpr std::array<s16, 12> kGems = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106};
     static constexpr std::array<s16, 19> kAttachments = {81, 82, 83, 84, 85, 91, 92, 93, 94, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120};
     static constexpr std::array<s16, 3> kGoodItems = {150, 178, 235}; // Stamina Drink, Dran's Feather, Powerup Powder
@@ -3843,7 +4083,7 @@ void OnMonstersPlaced(CMonstorUnit *unit) {
     if (roll(100) < 35) {
         boss.drop_item = kBackFloorKeys[dungeon];
     } else if (roll(100) < 15) {
-        const auto &table = UserStatus->cur_floor <= kHalfway[dungeon] ? kFirstHalf[dungeon] : kSecondHalf[dungeon];
+        const auto &table = DungeonWeapons(dungeon, UserStatus->cur_floor);
         boss.drop_item = table[roll(static_cast<int>(table.size()))];
     } else if (roll(100) < 50) {
         boss.drop_item = roll(100) < 30 ? kGems[roll(kGems.size())] : kAttachments[roll(kAttachments.size())];
@@ -3853,7 +4093,14 @@ void OnMonstersPlaced(CMonstorUnit *unit) {
 }
 
 void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor) {
-    if (map == nullptr || main_floor == 0) {
+    if (map == nullptr) {
+        return;
+    }
+
+    // Dark Cloud Enhanced: chest randomizer, ahead of the insured chest so that one keeps its sphere.
+    RandomizeChests(map, floor_no, main_floor);
+
+    if (main_floor == 0) {
         return;
     }
 
@@ -4057,6 +4304,18 @@ bool KeepsBait() {
 }
 
 void OnFloorStart() {
+    // Dark Cloud Enhanced: a Map or Magical Crystal carried in the bag lights the floor's.
+    if (g_carried_map) {
+        BtEquipMap = 1;
+    }
+
+    if (g_carried_crystal) {
+        BtEquipMasuisyou = 1;
+    }
+
+    g_carried_map = false;
+    g_carried_crystal = false;
+    g_angel_steps = 0;
     g_curse.drain_steps = 0;
     g_owl_nearest = -1;
     g_owl_out_of_range = true;
