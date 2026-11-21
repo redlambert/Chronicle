@@ -88,6 +88,7 @@
 #include "vutext.hpp"
 #include "weaponlevelup.hpp"
 #include "wind.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -1120,6 +1121,8 @@ int EditInit(void * /*param*/) {
     EdInitVillagerControl();
     EdInitVillagerTable(NowTime, EditMapInfo);
     EdLoadMainChara("chara/c01d.chr", "info.cfg", &CharaBuffer);
+    // Dark Cloud Enhanced: a new map starts with Toan walking it.
+    expanded::TownAllyMapLoaded();
     sceVu0FVECTOR start_position = {0.0f, 0.0f, 0.0f, 1.0f};
     sceVu0FVECTOR start_rotation = {0.0f, 0.0f, 0.0f, 0.0f};
     sceVu0FVECTOR fade;
@@ -1289,6 +1292,9 @@ struct ED_GRD_DATA {
  */
 int EditLoop() {
     goto_return_menu = 0;
+
+    // Dark Cloud Enhanced: the ally picked in the party menu takes over from Toan.
+    expanded::TownAllyStep();
 
     // Pausing is a walking action: an event must not open the pause menu, which reads state only
     // valid outside an event, over itself.
@@ -2128,6 +2134,9 @@ int EditLoop() {
                 EdInitMesParam();
                 EdInitDrawDay();
                 GameMode = ED_MODE_EVENT;
+                // Dark Cloud Enhanced: Toan comes back for the event; the event is logged.
+                expanded::LogTownEvent(start_system_event, true);
+                expanded::TownAllyEventStarted();
             }
         } else {
             if (EdEventInit(start_event_no, &EdWorkBuffer, EdEventData) != 0) {
@@ -2135,6 +2144,12 @@ int EditLoop() {
                 EdInitDrawDay();
                 GameMode = ED_MODE_EVENT;
                 ItemVolumeStep.CheckItemVolume();
+
+                // Dark Cloud Enhanced: Toan comes back for the event; the event is logged.
+                if (EdEventInfo.return_code != ED_EVENT_RETURN_TALK) {
+                    expanded::LogTownEvent(start_event_no, false);
+                    expanded::TownAllyEventStarted();
+                }
             }
 
             if (EdEventInfo.return_code == ED_EVENT_RETURN_TALK) {
@@ -4664,6 +4679,8 @@ void EdLoadMainChara(char *pack_path, char *info_name, CDataAlloc2<1> *arena) {
     }
 
     LoadFile(pack_path, read_buffer, nullptr);
+    // Dark Cloud Enhanced: the allies' motion fixes, and the config logged.
+    expanded::TownCharaPackLoaded(pack_path, read_buffer);
     MainChara.Initialize();
 
     for (i = 0; i < 128; i++) {

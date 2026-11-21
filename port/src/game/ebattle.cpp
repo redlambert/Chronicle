@@ -45,6 +45,7 @@
 #include "sysmes.hpp"
 #include "texture.hpp"
 #include "quest/enhanced.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -1314,7 +1315,8 @@ void EdEyeCamera(CCamera *camera, CCharacter *character) {
     sceVu0RotMatrixY(rotation, rotation, viewAngleH);
     sceVu0ApplyMatrix(reference, rotation, reference);
     character->GetPosition(position);
-    position[1] += 14.0f;
+    // Dark Cloud Enhanced: Xiao's eyes sit lower than Toan's.
+    position[1] += expanded::TownEyeHeight();
     reference[0] += position[0];
     reference[1] += position[1];
     reference[2] += position[2];
@@ -2010,7 +2012,8 @@ void EdMoveChara() {
         EdMoveCharaInfo.event_ready = false;
         ED_EVENT_PARAM *param = &EdMoveCharaInfo.param;
 
-        if (EdGetEvent(points, point_count, param, here, heading, time) != 0) {
+        // Dark Cloud Enhanced: some maps' event points are off while an ally walks them.
+        if (!expanded::TownAllySkipsEventPoints() && EdGetEvent(points, point_count, param, here, heading, time) != 0) {
             if (param->kind == ED_EVENT_POINT_ITEM_BOX && PadDown(0x40) != 0 && (viewMode == 0 || interior != 0)) {
                 int item = param->point->side;
                 int refused = EdCheckGetItem(item);

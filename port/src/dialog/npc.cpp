@@ -10,6 +10,7 @@
 #include "clsmes.hpp"
 #include "dialog/framework.hpp"
 #include "editloop.hpp"
+#include "enhanced_town.hpp"
 #include "gamepad.hpp"
 #include "localize/localize.hpp"
 #include "menu_draw.hpp"
@@ -44,6 +45,18 @@ Window g_window;
 
 // LocalizeMessageKey of the file EditMes1's villager messages came from.
 std::string g_message_file_key;
+
+// Dark Cloud Enhanced: what the villager says to the ally walking the town, kept for "Talk" when
+// the villager also has choices to offer, and the villager it is for.
+const char *g_ally_line = nullptr;
+NpcContext  g_ally_ctx;
+
+// Opens a conversation of only the ally's line, in the villager's window.
+void OpenAllyLine(const NpcContext &ctx, const char *line) {
+    OpenCustomSession(ctx, line, {});
+    g_window.retail_buff = EditMes1.buff;
+    g_window.shown.clear();
+}
 
 // The talk window grows to its widest line and never wraps one, so the framework wraps at about
 // the width retail's own villager lines run to, and keeps the rows within the window's ten.
@@ -224,7 +237,23 @@ bool DialogNpcOpen(int map_no, int character_info_id, int mes_no, const char *mo
     ctx.model = model != nullptr ? model : "";
     ctx.bubble = BubbleKind::SpeechTail;
     ctx.host_plays_original = true;
+
+    // Dark Cloud Enhanced: an ally walking the town hears the villager's line for them, in place of
+    // the villager's own words; choices the villager offers stay, with the line behind "Talk".
+    g_ally_line = dc::game::expanded::TownAllyTalk(map_no, character_info_id, ctx.model);
+    if (g_ally_line != nullptr) {
+        g_ally_ctx = ctx;
+        std::vector<ChoiceItem> choices;
+        QueryOptionProviders(ctx, choices);
+        if (choices.empty()) {
+            const char *line = std::exchange(g_ally_line, nullptr);
+            OpenAllyLine(ctx, line);
+            return true;
+        }
+    }
+
     if (!TryInterceptOpen(ctx, {})) {
+        g_ally_line = nullptr;
         return false;
     }
     g_window.retail_buff = EditMes1.buff;
@@ -257,7 +286,15 @@ DialogNpcState DialogNpcStep() {
         return DialogNpcState::Running;
     }
     HideWindow();
-    return TakeSessionEnd() == SessionEnd::PlayOriginal ? DialogNpcState::PlayOriginal : DialogNpcState::Closed;
+    const SessionEnd end = TakeSessionEnd();
+    const char      *ally_line = std::exchange(g_ally_line, nullptr);
+
+    // Dark Cloud Enhanced: "Talk" gives the ally's line rather than the villager's own.
+    if (end == SessionEnd::PlayOriginal && ally_line != nullptr) {
+        OpenAllyLine(g_ally_ctx, ally_line);
+        return DialogNpcState::Running;
+    }
+    return end == SessionEnd::PlayOriginal ? DialogNpcState::PlayOriginal : DialogNpcState::Closed;
 }
 
 bool DialogNpcSpeaking() {

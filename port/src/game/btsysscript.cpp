@@ -43,6 +43,7 @@
 #include "shot_freefuncs.hpp"
 #include "snd.hpp"
 #include "userstatus.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -120,6 +121,8 @@ void BtSystemScriptLoad(int floor) {
     g_event_data = ScriptBufferTail();
     LoadFile(path.data(), g_event_data, &read_size);
     wait_now_loading_vsync();
+    // Dark Cloud Enhanced: the script file is logged.
+    expanded::LogDungeonScript(floor, g_event_data, read_size);
     BtSystemScriptFileBuffer.Alloc((read_size >> 4) + 1);
     char *mes = ScriptBufferTail();
     LoadFile(mes_path.data(), mes, &mes_size);

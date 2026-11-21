@@ -47,6 +47,7 @@
 #include "userstatus.hpp"
 #include "vector.hpp"
 #include "weaponeffect.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -105,6 +106,8 @@ void selectChrUnit(int chara_no, int reload) {
     UserStatus->cur_chara = chara_no;
     LoadFile(const_cast<char *>(charaNameTbl[chara_no]), read_buffer, &size);
     wait_now_loading_vsync();
+    // Dark Cloud Enhanced: the party file's configs are logged.
+    expanded::LogDungeonChara(chara_no, read_buffer);
     size = static_cast<int>(static_cast<u_int>(((size >> 6) + 1) << 6) >> 2);
     u_int *weapon0 = &read_buffer[size];
     BtGetWeaponNamePath3(weapon0_name.data(), unused_cfg_name.data(), defWeapon[chara_no]);

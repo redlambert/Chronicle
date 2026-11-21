@@ -46,6 +46,7 @@
 #include "vutext.hpp"
 #include "weapon_buildup.hpp"
 #include "weaponlevelup.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -1460,6 +1461,37 @@ int BattleMenuCharaKey() {
                             }
                         }
 
+                        break;
+                    }
+                    case BATTLE_MENU_MODE_TOWN: {
+                        // Dark Cloud Enhanced: any ally in the party can walk the town in Toan's
+                        // place; they take over once the menu is left.
+                        bool picked = false;
+
+                        for (int i = 0; i < MenuChara.slot_count; i++) {
+                            if (SysChara[i].place != 0) {
+                                continue;
+                            }
+
+                            const int chara = SysChara[i].chara;
+
+                            if (chara < BtlMenuStatusPt->party_size) {
+                                expanded::TownAllySelect(chara);
+                                picked = true;
+                            }
+                        }
+
+                        if (!picked) {
+                            ComMenuSePlay(MENU_SOUND_REFUSE);
+                            break;
+                        }
+
+                        ComMenuSePlay(MENU_SOUND_CONFIRM);
+                        BattleMenuFlag = BTLMENU_STATE_CHARA_CLOSE;
+                        MenuChara.state = MENU_CHARA_CLOSE;
+                        MenuChara.timer = 0.0f;
+                        BtlEffectFlag = BTLEFFECT_PAGE_CLOSE;
+                        BtlEffectCt = 0;
                         break;
                     }
                     default:

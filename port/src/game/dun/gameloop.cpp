@@ -94,6 +94,7 @@
 #include "weaponeffect.hpp"
 #include "weaponelement.hpp"
 #include "wind.hpp"
+#include "enhanced_town.hpp"
 
 namespace dc::game {
 
@@ -1836,6 +1837,9 @@ void GameInit() {
 }
 
 int GameLoop() {
+    // Dark Cloud Enhanced: the system scripts the dungeon runs are logged.
+    expanded::LogDungeonTask();
+
     switch (BtGameModeFlag) {
         case BT_GAME_MODE_PLAY:
             DunMoveChara();
