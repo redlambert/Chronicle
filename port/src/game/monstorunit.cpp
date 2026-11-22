@@ -1837,6 +1837,12 @@ void CMonstorUnit::MoveCheck(float *position, float *movement, int flat) {
 
 void CMonstorUnit::MoveCheck2() {
     sceVu0FVECTOR player_position;
+
+    // Dark Cloud Expanded: a column standing on the floor turns the monster aside.
+    if (expanded::MonsterBlocked(current_monster)) {
+        return;
+    }
+
     sceVu0FVECTOR next_position;
     sceVu0FVECTOR position;
     sceVu0FVECTOR direction;

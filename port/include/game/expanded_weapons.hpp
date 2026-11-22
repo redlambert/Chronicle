@@ -510,6 +510,22 @@ void DecoyDraw(const float *scene_ambient);
  */
 void OnFloorStart();
 
+/**
+ * Dark Cloud Expanded: draws what Ungaga's Babel's Spear, Cactus and Terra Sword left standing.
+ */
+void ColumnDraw();
+
+/**
+ * Dark Cloud Expanded: stops a monster's move into a column standing on the floor.
+ */
+bool MonsterBlocked(int monster_no);
+
+/**
+ * Dark Cloud Expanded: each turn of the Heal ability's clock, whether the weapon has Heal or not.
+ */
+void OnHealCycle();
+
 } // namespace expanded
+
 
 } // namespace dc::game

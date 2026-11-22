@@ -17,7 +17,9 @@
 #include "btactstatus.hpp"
 #include "character.hpp"
 #include "clsmes.hpp"
+#include "collision.hpp"
 #include "collisiondata.hpp"
+#include "dataread.hpp"
 #include "dngmessageman.hpp"
 #include "dngstatusdata.hpp"
 #include "dungeonmap.hpp"
@@ -43,6 +45,7 @@
 #include "snd.hpp"
 #include "stockitem.hpp"
 #include "text/gametext.hpp"
+#include "texture.hpp"
 #include "userstatus.hpp"
 #include "quest/enhanced.hpp"
 
@@ -124,7 +127,7 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_SUPERNOVA, "Hits may stop, poison,\nanger or slime the\nenemy at random."},
     {ITEM_WEAPON_SECRET_ARMLET, "Owned: bad magic\ncircles turn out as\ngood ones."},
     {ITEM_WEAPON_BLESSING_GUN, "Owned: bait is never\nlost while fishing."},
-    {ITEM_WEAPON_CACTUS, "Absorb: hits refill\nUngaga's water by a\ntenth of the damage."},
+    {ITEM_WEAPON_CACTUS, "Hits refill water.\nGuard: a giant cactus\nstands 10 sec, pricks."},
     {ITEM_WEAPON_HEAVEN_S_CLOUD, "Typhoon: hold the\nwhirlwind charge to\ngrow the blade to 3x."},
     {ITEM_WEAPON_CHRONICLE_SWORD, "Hits also strike every\nenemy nearby, harder\nthe closer they stand."},
     {ITEM_WEAPON_BIG_BANG, "Whirlwind blasts all\naround. Guard 1.5 sec;\nthe next swing flashes."},
@@ -134,8 +137,10 @@ constexpr WeaponDescription kDescriptions[] = {
     {ITEM_WEAPON_BONE_SLINGSHOT, "Locked doors open\nwithout their key;\nundead stay down."},
     {ITEM_WEAPON_ATLAMILLIA_SWORD, "Owned: a weapon that\nbreaks leaves a Synth-\nSphere in a chest."},
     {ITEM_WEAPON_ANGEL_SHOOTER, "Guarding, Heal works\nevery second."},
-    {ITEM_WEAPON_ANGE_GEAR, "Mends the party 1 HP\nevery 5 s. Guarding,\nHeal works each second."},
-    {ITEM_WEAPON_BABEL_S_SPEAR, "Hits may stop every\nenemy on the floor\nfor 5 seconds."},
+    {ITEM_WEAPON_ANGE_GEAR, "Mends the party. Guard:\na giant slingshot\ncatches, returns shots."},
+    {ITEM_WEAPON_BABEL_S_SPEAR, "Hits may confuse. Guard\n5 sec: a giant spear\nconfuses the floor."},
+    {ITEM_WEAPON_TERRA_SWORD, "Guard 5 sec, lock on:\na boulder drops on the\nenemy, then stays."},
+    {ITEM_WEAPON_CHRONICLE2, "Owned: more big chests,\nPowerup Powder stays,\nclown gives weapons."},
     {ITEM_WEAPON_FROZEN_TUNA, "Worn WHP later heals\nGoro. Hits may freeze\neveryone, Goro too."},
 };
 
@@ -1457,39 +1462,6 @@ bool  g_tuna_healing = false;
 float g_tuna_last_whp = -1.0f;
 int   g_tuna_last_hp = -1;
 int   g_tuna_rolled_step = -1;
-int   g_babel_rolled_step = -1;
-
-// Dark Cloud Enhanced's Angel Gear: while Xiao is out with it, every five seconds the whole party
-// regains 1 HP, the knocked out excepted. Xiao herself only when its Heal is not live, which
-// already mends her.
-int g_angel_steps = 0;
-
-void AngelGearStep() {
-    constexpr int kAngelSteps = 5 * kStepsPerSecond;
-
-    if (UserStatus->cur_chara != CHARA_XIAO || HeldBy(CHARA_XIAO) != ITEM_WEAPON_ANGE_GEAR || NowWeaponHave == nullptr) {
-        g_angel_steps = 0;
-        return;
-    }
-
-    if (++g_angel_steps < kAngelSteps) {
-        return;
-    }
-
-    g_angel_steps = 0;
-
-    const bool heal_live = (NowWeaponHave->flags & 0x800) != 0;
-
-    for (int chara = 0; chara < 6; chara++) {
-        if (chara == CHARA_XIAO && heal_live) {
-            continue;
-        }
-
-        if (UserStatus->hp[chara] > 0 && UserStatus->hp[chara] < UserStatus->max_hp[chara]) {
-            UserStatus->hp[chara]++;
-        }
-    }
-}
 
 void TunaReset() {
     g_tuna_bank = 0.0f;
@@ -2232,6 +2204,1011 @@ void ConfuseStep() {
     }
 }
 
+// ── Ungaga: what rises from the ground and what falls on it ─────────────────────────────────
+
+// Three guard charges leave something standing on the floor: Babel's Spear and the Cactus raise
+// a giant copy of themselves point-up out of the ground, and the Terra Sword drops a boulder on
+// the locked-on enemy. Each stands as a solid column for a while: enemies walk around it and the
+// player is held out of it, and what touches it is hit. One of each kind stands at a time; all go
+// with a weapon or party change and a new floor. Left out against Expanded: enemy shots pass
+// through, the Dark Genie's beam and the summon smoke are not drawn, and a copy sinks away instead
+// of fading.
+
+/**
+ * A model drawn on the floor in place of where it belongs: the held weapon's frames laid out by a
+ * world matrix of the mod's own for one draw, then put back on the hand.
+ */
+struct FloorModel {
+    CFrame *root = nullptr;
+    int     block = -1;       // the texture block to reload before drawing
+    int     axis = 1;         // the model axis that points up
+    float   sign = 1.0f;      // +1: the tip is toward the axis's max
+    float   tip = 0.0f;       // the tip's distance from the root along that axis
+    bool    weapon = false;   // the live weapon: put back on the hand after drawing
+
+    /**
+     * Takes the held weapon, finding its long axis from its bound box.
+     */
+    bool TakeWeapon(CCharacter *held) {
+        root = nullptr;
+
+        if (held == nullptr || held->frame == nullptr) {
+            return false;
+        }
+
+        CFrame     *frame = held->frame;
+        CFrame     *parent = frame->parent;
+        const int   reference = frame->reference;
+        CBoxVu0     box;
+
+        frame->parent = nullptr;
+        frame->reference = 0;
+        frame->GetBoundBox(&box, 1);
+        frame->parent = parent;
+        frame->reference = reference;
+
+        axis = 0;
+
+        for (int i = 1; i < 3; i++) {
+            if (box.max[i] - box.min[i] > box.max[axis] - box.min[axis]) {
+                axis = i;
+            }
+        }
+
+        sign = std::fabs(box.max[axis]) >= std::fabs(box.min[axis]) ? 1.0f : -1.0f;
+        tip = sign > 0.0f ? box.max[axis] : -box.min[axis];
+        root = frame;
+        block = 0x1D;
+        weapon = true;
+        return true;
+    }
+
+    bool Valid() const {
+        return root != nullptr && (!weapon || (NowWeapon != nullptr && NowWeapon->frame == root));
+    }
+
+    static void Invalidate(CFrame *frame) {
+        for (; frame != nullptr; frame = frame->brother) {
+            frame->world_valid = false;
+            Invalidate(frame->child);
+        }
+    }
+
+    /**
+     * Draws it with its root at x, y, z, scaled, turned yaw about the vertical. A weapon is stood
+     * on its tip axis; anything else is drawn as authored.
+     */
+    void Draw(float x, float y, float z, float scale, float yaw) {
+        if (!Valid() || scale <= 0.0f) {
+            return;
+        }
+
+        CFrame       *parent = root->parent;
+        const int     reference = root->reference;
+        const int     srt = root->srt;
+        sceVu0FMATRIX local;
+        std::memcpy(local, root->local, sizeof(local));
+
+        const float c = std::cos(yaw);
+        const float s = std::sin(yaw);
+        sceVu0FMATRIX place = {};
+
+        if (weapon) {
+            // The tip axis to up; the two others to the ground plane, kept right-handed.
+            const int b = (axis + 1) % 3;
+            const int d = (axis + 2) % 3;
+            const float flat_b[2] = {0.0f, 1.0f}; // to z
+            const float flat_d[2] = {sign, 0.0f}; // to x (mirrored with the tip)
+
+            place[axis][1] = sign * scale;
+            place[b][0] = scale * (flat_b[0] * c + flat_b[1] * s);
+            place[b][2] = scale * (-flat_b[0] * s + flat_b[1] * c);
+            place[d][0] = scale * (flat_d[0] * c + flat_d[1] * s);
+            place[d][2] = scale * (-flat_d[0] * s + flat_d[1] * c);
+        } else {
+            place[0][0] = scale * c;
+            place[0][2] = -scale * s;
+            place[1][1] = scale;
+            place[2][0] = scale * s;
+            place[2][2] = scale * c;
+        }
+
+        place[3][0] = x;
+        place[3][1] = y;
+        place[3][2] = z;
+        place[3][3] = 1.0f;
+
+        root->parent = nullptr;
+        root->reference = 0;
+        root->srt = 0;
+        std::memcpy(root->local, place, sizeof(place));
+        Invalidate(root);
+
+        if (block >= 0) {
+            TexManager.ReloadTexture(Vif1Packet, block);
+        }
+
+        MGDraw(root);
+
+        root->parent = parent;
+        root->reference = reference;
+        root->srt = srt;
+        std::memcpy(root->local, local, sizeof(local));
+        Invalidate(root);
+    }
+};
+
+/**
+ * Master Utan's boulder (gedit/s96/chara/iwa.chr), loaded the first time the Terra Sword primes
+ * and kept for the session. Its texture goes in block 0x30, which nothing else in a dungeon uses.
+ */
+constexpr int kRockTextureBlock = 0x30;
+constexpr int kRockFileBytes = 512 * 1024;
+constexpr int kRockModelBytes = 256 * 1024;
+
+alignas(64) u_long128 g_rock_file[kRockFileBytes / 16];
+alignas(64) u_long128 g_rock_model_bytes[kRockModelBytes / 16];
+CDataAlloc2<1>        g_rock_alloc;
+CFrame               *g_rock_frame = nullptr;
+bool                  g_rock_tried = false;
+int                   g_rock_texture_floor = -1; // the floor the texture was entered for
+
+CFrame *RockModel() {
+    if (!g_rock_tried) {
+        g_rock_tried = true;
+        char path[] = "gedit/s96/chara/iwa.chr";
+        int  size = 0;
+
+        if (LoadFileBG(path, g_rock_file, &size) != 0 && size > 0 && size <= kRockFileBytes) {
+            char  mds_name[] = "iwa.mds";
+            int   mds_size = 0;
+            auto *pack = reinterpret_cast<u_int *>(g_rock_file);
+            u_int *mds = GetPackFile(pack, mds_name, &mds_size);
+
+            if (mds != nullptr) {
+                g_rock_alloc.base = reinterpret_cast<u_char *>(g_rock_model_bytes);
+                g_rock_alloc.used = 0;
+                g_rock_alloc.limit = kRockModelBytes / 16;
+                g_rock_frame = LoadMDSFile(mds, &g_rock_alloc, 0, nullptr, nullptr);
+            }
+        }
+
+        std::printf("[Expanded] Terra Sword boulder %s\n", g_rock_frame != nullptr ? "loaded" : "NOT FOUND");
+    }
+
+    // The dungeon's texture blocks are rebuilt on a floor change, so the picture goes back in.
+    if (g_rock_frame != nullptr && UserStatus != nullptr && g_rock_texture_floor != UserStatus->cur_floor + 100 * selectMapNo) {
+        char  img_name[] = "iwa.img";
+        int   img_size = 0;
+        u_int *img = GetPackFile(reinterpret_cast<u_int *>(g_rock_file), img_name, &img_size);
+
+        if (img != nullptr) {
+            TexManager.DeleteTextureBlock(kRockTextureBlock);
+            TexManager.EnterIMGFile(reinterpret_cast<u_char *>(img), kRockTextureBlock, 0, 0);
+            g_rock_texture_floor = UserStatus->cur_floor + 100 * selectMapNo;
+        }
+    }
+
+    return g_rock_frame;
+}
+
+/**
+ * One hit on monster m's nearest live hit sphere to (x, z): its damage, a kick from origin, and
+ * through any guard when guard_break.
+ */
+bool PlantHitNear(int m, float x, float z, float reach, int damage, const float *origin, float kick, bool guard_break,
+                  float max_height = 1e9f) {
+    if (NowMonstorUnit == nullptr || NowWeaponHave == nullptr || !ActiveMonster(m)) {
+        return false;
+    }
+
+    const auto &spheres = NowMonstorUnit->effect[m];
+    int         nearest = -1;
+    float       edge = 0.0f;
+
+    for (int sphere = 0; sphere < 16; sphere++) {
+        if (spheres.timer[sphere] == 0 || spheres.position[sphere][1] - spheres.radius[sphere] > max_height) {
+            continue;
+        }
+
+        const float dx = spheres.position[sphere][0] - x;
+        const float dz = spheres.position[sphere][2] - z;
+        const float distance = std::max(0.0f, std::sqrt(dx * dx + dz * dz) - spheres.radius[sphere]);
+
+        if (nearest < 0 || distance < edge) {
+            nearest = sphere;
+            edge = distance;
+        }
+    }
+
+    if (nearest < 0 || edge > reach) {
+        return false;
+    }
+
+    float centre[4] = {spheres.position[nearest][0], spheres.position[nearest][1], spheres.position[nearest][2], 1.0f};
+    NowColData->Set(centre, std::max(1, damage), 1, spheres.radius[nearest] + 1.0f, 0.0f, 2, 2, 0, 0);
+
+    auto &hit = NowColData->hit[NowColData->now_hit];
+    hit.vs_monster = NowWeaponHave->vs_monster;
+    hit.weapon_flags = NowWeaponHave->flags;
+    hit.flags = 0;
+    hit.owner = UserStatus->cur_chara;
+    hit.attack_no = 0;
+
+    float from[4] = {origin[0], origin[1], origin[2], 1.0f};
+    NowColData->SetKickBack(from, kick, kBlastKickDecay, 2);
+
+    if (guard_break) {
+        g_blast_crush[g_blast_crush_next] = {NowColData->now_hit, std::max(1, damage), g_step_count};
+        g_blast_crush_next = (g_blast_crush_next + 1) % static_cast<int>(g_blast_crush.size());
+    }
+
+    return true;
+}
+
+int WeaponAttack() {
+    return NowWeaponHave != nullptr ? NowWeaponHave->attack : 0;
+}
+
+enum class ColumnKind { Spear, Cactus, Rock };
+
+struct Column {
+    ColumnKind kind;
+    bool       up = false;
+    FloorModel model;
+    float      x = 0.0f, z = 0.0f, ground = 0.0f;
+    float      scale = 1.0f;
+    float      yaw = 0.0f;
+    float      radius = 6.0f;   // solid to enemies and the player within this
+    int        age = 0;         // steps since it was raised
+    int        life = 0;        // steps it stands before it goes
+    int        gone = 0;        // steps it takes to sink away after
+    int        next_hit = 0;
+    int        target = -1;     // Babel's Spear: the enemy it rises under
+    bool       struck = false;
+    float      fall_y = 0.0f;   // the rock: its bottom's height while it falls
+    float      fall_speed = 0.0f;
+    bool       falling = false;
+    int        weapon_item = -1;
+};
+
+// Babel's Spear "Curse of Babel".
+constexpr int   kBabelGuardSteps = 5 * kStepsPerSecond;
+constexpr float kBabelScale = 5.0f;
+constexpr float kBabelExposed = 10.0f;     // of the model's length out of the ground, before scaling
+constexpr float kBabelRadius = 8.0f;
+constexpr float kBabelStrikeReach = 6.0f;
+constexpr int   kBabelRiseSteps = kStepsPerSecond / 2;
+constexpr int   kBabelLifeSteps = 20 * kStepsPerSecond;
+constexpr int   kBabelGoneSteps = 220;      // Expanded's vanish, 3.67 s
+constexpr float kBabelSpin = 240.0f * 3.14159265f / 180.0f / kStepsPerSecond;
+constexpr float kBabelNoLockReach = 60.0f;
+constexpr float kBabelAhead = 15.0f;
+// Cactus "Desert Bloom".
+constexpr int   kCactusGuardSteps = 15;
+constexpr float kCactusScale = 3.0f;
+constexpr float kCactusExposed = 6.8f;
+constexpr float kCactusRadius = 6.0f;
+constexpr int   kCactusRiseSteps = 18;
+constexpr int   kCactusLifeSteps = 10 * kStepsPerSecond;
+constexpr int   kCactusGoneSteps = kStepsPerSecond / 2;
+constexpr float kCactusAhead = 10.0f;
+// The spikes of both: a sixth of the attack every quarter second to what touches the column.
+constexpr float kSpikeReach = 2.0f;
+constexpr float kSpikeShare = 1.0f / 6.0f;
+constexpr int   kSpikeSteps = kStepsPerSecond / 4;
+constexpr float kSpikeKick = 1.0f;
+// Terra Sword "Big Rock".
+constexpr int   kRockGuardSteps = 5 * kStepsPerSecond;
+constexpr float kRockDrop = 500.0f;
+constexpr float kRockGravity = 180.0f / (kStepsPerSecond * kStepsPerSecond);
+constexpr float kRockGrowDrop = 150.0f;
+constexpr float kRockRadius = 21.0f;
+constexpr float kRockBlast = kRockRadius + 5.0f;
+constexpr float kRockSink = 4.0f;
+constexpr int   kRockLifeSteps = 20 * kStepsPerSecond;
+constexpr int   kRockGoneSteps = kStepsPerSecond / 2;
+constexpr float kRockWhp = 10.0f;
+
+Column g_babel{ColumnKind::Spear};
+Column g_cactus{ColumnKind::Cactus};
+Column g_rock{ColumnKind::Rock};
+int    g_column_guard = 0;     // steps the guard has been held
+bool   g_column_cast = false;  // this guard has raised something already
+bool   g_rock_primed = false;
+
+/**
+ * The root's height for a weapon copy whose exposed share of its length is out by t (0 to 1).
+ */
+float CopyRoot(const Column &column, float exposed, float t) {
+    const float top = column.ground + exposed * column.scale;
+    const float buried = column.ground - 4.0f;
+    const float tip_y = buried + (top - buried) * std::clamp(t, 0.0f, 1.0f);
+    return tip_y - column.model.tip * column.scale;
+}
+
+/**
+ * Where the column's root stands this step, and whether it is out of the ground enough to block.
+ */
+float ColumnRoot(const Column &column, bool &solid) {
+    solid = false;
+
+    switch (column.kind) {
+        case ColumnKind::Spear: {
+            float t = static_cast<float>(column.age) / kBabelRiseSteps;
+
+            if (column.age > column.life) {
+                t = 1.0f - static_cast<float>(column.age - column.life) / column.gone;
+            }
+
+            solid = t > 0.5f;
+            return CopyRoot(column, kBabelExposed, t);
+        }
+        case ColumnKind::Cactus: {
+            float t = static_cast<float>(column.age) / kCactusRiseSteps;
+
+            if (column.age > column.life) {
+                t = 1.0f - static_cast<float>(column.age - column.life) / column.gone;
+            }
+
+            solid = t > 0.5f;
+            return CopyRoot(column, kCactusExposed, t);
+        }
+        case ColumnKind::Rock: {
+            if (column.falling) {
+                return column.fall_y + kRockRadius;
+            }
+
+            float sink = 0.0f;
+
+            if (column.age > column.life) {
+                sink = 2.0f * kRockRadius * static_cast<float>(column.age - column.life) / column.gone;
+            }
+
+            solid = sink < kRockRadius;
+            return column.ground + kRockRadius - kRockSink - sink;
+        }
+    }
+
+    return column.ground;
+}
+
+bool ColumnSolid(const Column &column) {
+    bool solid = false;
+
+    if (column.up) {
+        ColumnRoot(column, solid);
+    }
+
+    return solid;
+}
+
+void ColumnEnd(Column &column) {
+    column.up = false;
+    column.model.root = nullptr;
+    column.target = -1;
+    column.falling = false;
+}
+
+void ColumnsReset() {
+    ColumnEnd(g_babel);
+    ColumnEnd(g_cactus);
+    ColumnEnd(g_rock);
+    g_column_guard = 0;
+    g_column_cast = false;
+    g_rock_primed = false;
+}
+
+/**
+ * The locked-on enemy, else the nearest within reach of Ungaga; -1 with none.
+ */
+int ColumnTarget(float reach) {
+    const int locked = LockedTarget();
+
+    if (locked >= 0) {
+        return locked;
+    }
+
+    int   best = -1;
+    float best_distance = reach * reach;
+
+    for (int m = 0; m < 16 && NowMonstorUnit != nullptr; m++) {
+        if (!ActiveMonster(m)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(m, at);
+        const float dx = at[0] - CharaMain.pos[0];
+        const float dz = at[2] - CharaMain.pos[2];
+
+        if (dx * dx + dz * dz < best_distance) {
+            best_distance = dx * dx + dz * dz;
+            best = m;
+        }
+    }
+
+    return best;
+}
+
+void Ahead(float distance, float &x, float &z) {
+    x = CharaMain.pos[0] + std::sin(CharaMain.rotation.y) * distance;
+    z = CharaMain.pos[2] + std::cos(CharaMain.rotation.y) * distance;
+}
+
+void RaiseCopy(Column &column, int held, float scale, float radius, int life, int gone) {
+    if (!column.model.TakeWeapon(NowWeapon)) {
+        column.up = false;
+        return;
+    }
+
+    column.up = true;
+    column.scale = scale;
+    column.radius = radius;
+    column.life = life;
+    column.gone = gone;
+    column.age = 0;
+    column.next_hit = 0;
+    column.struck = false;
+    column.yaw = CharaMain.rotation.y;
+    column.weapon_item = held;
+}
+
+void RaiseBabel(int held) {
+    Column &column = g_babel;
+    column.target = ColumnTarget(kBabelNoLockReach);
+
+    if (column.target >= 0) {
+        float at[4];
+        MonsterPosition(column.target, at);
+        column.x = at[0];
+        column.z = at[2];
+        column.ground = at[1];
+    } else {
+        Ahead(kBabelAhead, column.x, column.z);
+        column.ground = CharaMain.pos[1];
+    }
+
+    RaiseCopy(column, held, kBabelScale, kBabelRadius, kBabelLifeSteps, kBabelGoneSteps);
+    setUnitAmbientAnime(15.0f, 1.0f, 12.0f, 50.0f, 84.0f);
+}
+
+void RaiseCactus(int held) {
+    Column &column = g_cactus;
+    Ahead(kCactusAhead, column.x, column.z);
+    column.ground = CharaMain.pos[1];
+    RaiseCopy(column, held, kCactusScale, kCactusRadius, kCactusLifeSteps, kCactusGoneSteps);
+}
+
+void DropRock(int target, int held) {
+    CFrame *frame = RockModel();
+
+    if (frame == nullptr) {
+        return;
+    }
+
+    Column &column = g_rock;
+    float   at[4];
+    MonsterPosition(target, at);
+    column.up = true;
+    column.model = {};
+    column.model.root = frame;
+    column.model.block = kRockTextureBlock;
+    column.x = at[0];
+    column.z = at[2];
+    column.ground = at[1];
+    column.radius = kRockRadius;
+    column.scale = 1.0f;
+    column.yaw = static_cast<float>(std::rand() % 628) / 100.0f;
+    column.target = target;
+    column.falling = true;
+    column.fall_y = at[1] + kRockDrop;
+    column.fall_speed = 0.0f;
+    column.life = kRockLifeSteps;
+    column.gone = kRockGoneSteps;
+    column.age = 0;
+    column.next_hit = 0;
+    column.weapon_item = held;
+}
+
+/**
+ * The spikes: a hit on every enemy touching the column, from its centre, once every interval.
+ */
+void Spikes(Column &column, float share, float reach, float kick, float top) {
+    if (column.age < column.next_hit) {
+        return;
+    }
+
+    column.next_hit = column.age + kSpikeSteps;
+    const int   damage = static_cast<int>(std::lround(WeaponAttack() * share));
+    const float origin[4] = {column.x, column.ground, column.z, 1.0f};
+
+    for (int m = 0; m < 16; m++) {
+        PlantHitNear(m, column.x, column.z, column.radius + reach, damage, origin, kick, false, top);
+    }
+}
+
+/**
+ * Curse of Babel's floor: every regular enemy confused while the spear stands and fades.
+ */
+void BabelConfusion() {
+    const int until = g_step_count + 2;
+
+    for (int m = 0; m < 16; m++) {
+        if (ActiveMonster(m) && NowMonstorUnit->monster[m].kind != MONSTER_KIND_NO_LOCK_ON) {
+            g_confused_until[m] = std::max(g_confused_until[m], until);
+        }
+    }
+}
+
+void BabelStep() {
+    Column &column = g_babel;
+    column.age++;
+
+    if (column.age > column.life + column.gone) {
+        ColumnEnd(column);
+        return;
+    }
+
+    // It follows its enemy while it rises; the tip strikes once it is out.
+    if (column.age < kBabelRiseSteps && column.target >= 0 && ActiveMonster(column.target)) {
+        float at[4];
+        MonsterPosition(column.target, at);
+        column.x = at[0];
+        column.z = at[2];
+    }
+
+    if (!column.struck && column.age >= kBabelRiseSteps) {
+        column.struck = true;
+        const float origin[4] = {column.x, column.ground, column.z, 1.0f};
+
+        for (int m = 0; m < 16; m++) {
+            PlantHitNear(m, column.x, column.z, kBabelStrikeReach, WeaponAttack(), origin, 2.02f, true);
+        }
+    }
+
+    if (column.age >= kBabelRiseSteps && column.age <= column.life) {
+        column.yaw += kBabelSpin;
+        Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + kBabelExposed * column.scale);
+    }
+
+    BabelConfusion();
+}
+
+void CactusStep() {
+    Column &column = g_cactus;
+    column.age++;
+
+    if (column.age > column.life + column.gone) {
+        ColumnEnd(column);
+        return;
+    }
+
+    if (column.age >= kCactusRiseSteps && column.age <= column.life) {
+        Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + kCactusExposed * column.scale);
+    }
+}
+
+void RockStep() {
+    Column &column = g_rock;
+
+    if (column.falling) {
+        // It follows the enemy down until it lands.
+        if (column.target >= 0 && ActiveMonster(column.target)) {
+            float at[4];
+            MonsterPosition(column.target, at);
+            column.x = at[0];
+            column.z = at[2];
+            column.ground = at[1];
+        }
+
+        column.fall_speed += kRockGravity;
+        column.fall_y -= column.fall_speed;
+        const float dropped = column.ground + kRockDrop - column.fall_y;
+        column.scale = std::clamp(dropped / kRockGrowDrop, 0.01f, 1.0f);
+
+        if (column.fall_y > column.ground - kRockSink) {
+            return;
+        }
+
+        // The landing: four times the attack to every enemy within reach, through any guard.
+        column.falling = false;
+        column.scale = 1.0f;
+        column.age = 0;
+        column.next_hit = kStepsPerSecond;
+        const float origin[4] = {column.x, column.ground, column.z, 1.0f};
+
+        for (int m = 0; m < 16; m++) {
+            PlantHitNear(m, column.x, column.z, kRockBlast, WeaponAttack() * 4, origin, kBlastKickSpeed * 1.41421356f, true);
+        }
+
+        DrainWhp(column.weapon_item, kRockWhp);
+        setUnitAmbientAnime(15.0f, 1.0f, 80.0f, 150.0f, 20.0f);
+        return;
+    }
+
+    column.age++;
+
+    if (column.age > column.life + column.gone) {
+        ColumnEnd(column);
+        return;
+    }
+
+    // Resting, it crushes what is under it once a second.
+    if (column.age <= column.life && column.age >= column.next_hit) {
+        column.next_hit = column.age + kStepsPerSecond;
+        const float origin[4] = {column.x, column.ground, column.z, 1.0f};
+
+        for (int m = 0; m < 16; m++) {
+            PlantHitNear(m, column.x, column.z, column.radius, WeaponAttack(), origin, 1.0f, true);
+        }
+    }
+}
+
+void ColumnsStep() {
+    const int  held = HeldBy(CHARA_UNGAGA);
+    const bool ungaga_out = UserStatus->cur_chara == CHARA_UNGAGA;
+
+    // Each goes with its weapon leaving Ungaga's hand or Ungaga leaving the field.
+    for (Column *column : {&g_babel, &g_cactus, &g_rock}) {
+        if (column->up && (!ungaga_out || held != column->weapon_item || (column->model.weapon && !column->model.Valid()))) {
+            ColumnEnd(*column);
+        }
+    }
+
+    if (!ungaga_out || (held != ITEM_WEAPON_BABEL_S_SPEAR && held != ITEM_WEAPON_CACTUS && held != ITEM_WEAPON_TERRA_SWORD)) {
+        g_column_guard = 0;
+        g_column_cast = false;
+        g_rock_primed = false;
+    } else if (BtActStatus.guard_mode != kGuarding) {
+        g_column_guard = 0;
+        g_column_cast = false;
+    } else if (!g_column_cast) {
+        g_column_guard++;
+
+        if (held == ITEM_WEAPON_CACTUS && g_column_guard >= kCactusGuardSteps) {
+            g_column_cast = true;
+            RaiseCactus(held);
+        } else if (held == ITEM_WEAPON_BABEL_S_SPEAR && !g_babel.up && g_column_guard >= kBabelGuardSteps) {
+            g_column_cast = true;
+            RaiseBabel(held);
+        } else if (held == ITEM_WEAPON_TERRA_SWORD && !g_rock.up && g_column_guard >= kRockGuardSteps) {
+            g_column_cast = true;
+            g_rock_primed = RockModel() != nullptr;
+            setUnitAmbientAnime(15.0f, 1.0f, 80.0f, 150.0f, 20.0f);
+        }
+    }
+
+    // Primed, the boulder waits for a lock-on.
+    if (g_rock_primed && held == ITEM_WEAPON_TERRA_SWORD && !g_rock.up) {
+        const int target = LockedTarget();
+
+        if (target >= 0) {
+            g_rock_primed = false;
+            DropRock(target, held);
+        }
+    }
+
+    if (g_babel.up) {
+        BabelStep();
+    }
+
+    if (g_cactus.up) {
+        CactusStep();
+    }
+
+    if (g_rock.up) {
+        RockStep();
+    }
+
+    // The player is held out of what stands.
+    for (const Column *column : {&g_babel, &g_cactus, &g_rock}) {
+        if (!ColumnSolid(*column)) {
+            continue;
+        }
+
+        const float keep = column->radius + 6.0f;
+        const float dx = CharaMain.pos[0] - column->x;
+        const float dz = CharaMain.pos[2] - column->z;
+        const float distance = std::sqrt(dx * dx + dz * dz);
+
+        if (distance < keep && distance > 0.01f) {
+            CharaMain.SetPosition(column->x + dx / distance * keep, CharaMain.pos[1], column->z + dz / distance * keep);
+        }
+    }
+}
+
+void ColumnsDraw() {
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+        return;
+    }
+
+    for (Column *column : {&g_babel, &g_cactus, &g_rock}) {
+        if (!column->up) {
+            continue;
+        }
+
+        bool        solid = false;
+        const float root = ColumnRoot(*column, solid);
+        column->model.Draw(column->x, root, column->z, column->scale, column->yaw);
+    }
+}
+
+/**
+ * Stops monster m's move this step when it would walk into a standing column.
+ */
+bool ColumnBlocksMonster(int m) {
+    MONSTOR &monster = NowMonstorUnit->monster[m];
+    float    at[4];
+    MonsterPosition(m, at);
+    const float next_x = at[0] + monster.movement[0] * monster.movement_speed;
+    const float next_z = at[2] + monster.movement[2] * monster.movement_speed;
+
+    for (const Column *column : {&g_babel, &g_cactus, &g_rock}) {
+        if (!ColumnSolid(*column)) {
+            continue;
+        }
+
+        const float keep = column->radius + monster.body_radius;
+        const float now_dx = at[0] - column->x;
+        const float now_dz = at[2] - column->z;
+        const float next_dx = next_x - column->x;
+        const float next_dz = next_z - column->z;
+
+        // Only a step that brings it nearer, inside the column's keep.
+        if (next_dx * next_dx + next_dz * next_dz < keep * keep &&
+            next_dx * next_dx + next_dz * next_dz < now_dx * now_dx + now_dz * now_dz) {
+            monster.movement[0] = 0.0f;
+            monster.movement[1] = 0.0f;
+            monster.movement[2] = 0.0f;
+            monster.movement_speed = 0.0f;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+// ── Angel Gear "Guardian Reflector" ─────────────────────────────────────────────────────────
+
+// While Xiao guards with it, a copy of the slingshot twice its size stands 12 units in front of
+// her, turned to the nearest enemy shot coming at her, else the nearest enemy. A shot that reaches
+// it, or her, is caught and fired back from it at the nearest enemy, with the weapon's attack and
+// the shot's own element and ailments. Enemy blows that land on it wear it down: the fifth breaks
+// it, and it cannot stand again for four seconds. Left out against Expanded: enemies walking to
+// it and swinging at it in place of her, its health on the attack gauge, its own draw-and-shoot
+// animation, the fade in and out, and the break sound.
+constexpr float kShieldScale = 2.0f;
+constexpr float kShieldAhead = 12.0f;
+constexpr float kShieldHeight = 7.5f;
+constexpr float kShieldCatch = 10.0f;      // a shot this near the pouch is caught
+constexpr float kShieldBody = 8.0f;        // ...or this near Xiao
+constexpr float kShieldWatch = 120.0f;     // shots this near are what it turns to
+constexpr int   kShieldHits = 5;
+constexpr int   kShieldCooldown = 4 * kStepsPerSecond;
+constexpr int   kShieldHitGap = kStepsPerSecond / 2;  // one enemy's blow counts once in this
+constexpr int   kReflectGap = kStepsPerSecond / 4;    // between two shots it fires back
+
+alignas(64) u_char g_reflect_frames[1024 * 1024];
+BorrowedShot       g_reflect(g_reflect_frames, sizeof(g_reflect_frames));
+
+struct CaughtShot {
+    CSHOT_EFFECT *from;
+};
+
+FloorModel              g_shield_model;
+bool                    g_shield_up = false;
+float                   g_shield_pos[4] = {};
+float                   g_shield_yaw = 0.0f;
+int                     g_shield_hits = 0;
+int                     g_shield_broken = 0;   // steps left before it may stand again
+std::array<int, 16>     g_shield_hit_at{};
+std::vector<CaughtShot> g_caught;
+int                     g_reflect_ready = 0;
+
+bool ReflectorHeld() {
+    return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && HeldBy(CHARA_XIAO) == ITEM_WEAPON_ANGE_GEAR;
+}
+
+void ShieldReset() {
+    g_shield_up = false;
+    g_shield_model.root = nullptr;
+    g_shield_hits = 0;
+    g_shield_broken = 0;
+    g_shield_hit_at = {};
+    g_caught.clear();
+    g_reflect_ready = 0;
+    g_reflect.Drop();
+}
+
+float FlatDistance(const float *a, const float *b) {
+    const float dx = a[0] - b[0];
+    const float dz = a[2] - b[2];
+    return std::sqrt(dx * dx + dz * dz);
+}
+
+/**
+ * The nearest live enemy to a point, or -1.
+ */
+int NearestMonster(const float *from, float reach) {
+    int   best = -1;
+    float best_distance = reach;
+
+    for (int m = 0; m < 16 && NowMonstorUnit != nullptr; m++) {
+        if (!ActiveMonster(m)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(m, at);
+        const float distance = FlatDistance(at, from);
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = m;
+        }
+    }
+
+    return best;
+}
+
+void ReflectorStep() {
+    if (g_shield_broken > 0) {
+        g_shield_broken--;
+    }
+
+    const bool guarding = ReflectorHeld() && BtActStatus.guard_mode == kGuarding && g_shield_broken == 0;
+
+    if (!guarding) {
+        g_shield_up = false;
+        g_shield_model.root = nullptr;
+
+        if (!ReflectorHeld()) {
+            g_caught.clear();
+        }
+    } else {
+        if (!g_shield_up) {
+            g_shield_up = g_shield_model.TakeWeapon(NowWeapon);
+            g_shield_model.weapon = true;
+            g_shield_hits = 0;
+        }
+
+        // Turned to the nearest shot coming at her, else the nearest enemy, else ahead.
+        float bearing_to[4] = {};
+        float nearest_shot = kShieldWatch;
+        bool  found = false;
+
+        if (NowShotEffect != nullptr) {
+            for (CSHOT_EFFECT &effect : NowShotEffect->effect) {
+                for (int slot = 0; slot < effect.slot_count && slot < 8; slot++) {
+                    if (effect.active[slot] == 0) {
+                        continue;
+                    }
+
+                    const float distance = FlatDistance(effect.chara[slot].pos, CharaMain.pos);
+
+                    if (distance < nearest_shot) {
+                        nearest_shot = distance;
+                        sceVu0CopyVector(bearing_to, effect.chara[slot].pos);
+                        found = true;
+                    }
+                }
+            }
+        }
+
+        if (!found) {
+            const int m = NearestMonster(CharaMain.pos, 1e9f);
+
+            if (m >= 0) {
+                MonsterPosition(m, bearing_to);
+                found = true;
+            }
+        }
+
+        g_shield_yaw = found ? std::atan2(bearing_to[0] - CharaMain.pos[0], bearing_to[2] - CharaMain.pos[2]) : CharaMain.rotation.y;
+        g_shield_pos[0] = CharaMain.pos[0] + std::sin(g_shield_yaw) * kShieldAhead;
+        g_shield_pos[1] = CharaMain.pos[1] + kShieldHeight;
+        g_shield_pos[2] = CharaMain.pos[2] + std::cos(g_shield_yaw) * kShieldAhead;
+        g_shield_pos[3] = 1.0f;
+
+        // Every enemy shot that reaches the pouch or her is caught.
+        if (NowShotEffect != nullptr) {
+            for (CSHOT_EFFECT &effect : NowShotEffect->effect) {
+                for (int slot = 0; slot < effect.slot_count && slot < 8; slot++) {
+                    if (effect.active[slot] == 0) {
+                        continue;
+                    }
+
+                    const float *at = effect.chara[slot].pos;
+                    const bool   pouch = FlatDistance(at, g_shield_pos) < kShieldCatch;
+                    const bool   body = FlatDistance(at, CharaMain.pos) < kShieldBody;
+
+                    if (pouch || body) {
+                        effect.OffEffect(slot);
+
+                        if (g_caught.size() < 8) {
+                            g_caught.push_back({&effect});
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // What was caught goes back out, one at a time, at the nearest enemy.
+    if (g_reflect_ready > 0) {
+        g_reflect_ready--;
+    }
+
+    if (g_caught.empty() || g_reflect_ready > 0 || !ReflectorHeld() || NowWeaponHave == nullptr) {
+        return;
+    }
+
+    CSHOT_EFFECT *from = g_caught.front().from;
+    g_caught.erase(g_caught.begin());
+
+    if (from->effect_data == nullptr || from->template_chara.frame == nullptr) {
+        return;
+    }
+
+    if (!g_reflect.Valid() || g_reflect.source != from) {
+        g_reflect.Build(*from);
+    }
+
+    float origin[4];
+    sceVu0CopyVector(origin, g_shield_up ? g_shield_pos : CharaMain.pos);
+    origin[1] = CharaMain.pos[1] + kShieldHeight;
+
+    float     direction[4] = {std::sin(g_shield_yaw), 0.0f, std::cos(g_shield_yaw), 0.0f};
+    const int m = NearestMonster(origin, 1e9f);
+
+    if (m >= 0) {
+        float at[4];
+        MonsterPosition(m, at);
+        at[1] += kShieldHeight;
+        const float dx = at[0] - origin[0];
+        const float dy = at[1] - origin[1];
+        const float dz = at[2] - origin[2];
+        const float length = std::max(0.01f, std::sqrt(dx * dx + dy * dy + dz * dz));
+        direction[0] = dx / length;
+        direction[1] = dy / length;
+        direction[2] = dz / length;
+    }
+
+    g_reflect.Fire(origin, direction, NowWeaponHave->attack, CHARA_XIAO);
+    g_reflect_ready = kReflectGap;
+}
+
+/**
+ * An enemy's blow at a point: one that lands on the standing slingshot wears it down.
+ */
+void ShieldBlow(int attacker, const float *at, float radius) {
+    if (!g_shield_up || attacker < 0 || attacker >= 16 || FlatDistance(at, g_shield_pos) > radius + 6.0f * kShieldScale) {
+        return;
+    }
+
+    if (g_shield_hit_at[attacker] > g_step_count) {
+        return;
+    }
+
+    g_shield_hit_at[attacker] = g_step_count + kShieldHitGap;
+
+    if (++g_shield_hits >= kShieldHits) {
+        g_shield_up = false;
+        g_shield_model.root = nullptr;
+        g_shield_broken = kShieldCooldown;
+        setUnitAmbientAnime(15.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+    }
+}
+
+void ShieldDraw() {
+    if (!g_shield_up || !ReflectorHeld()) {
+        return;
+    }
+
+    g_shield_model.Draw(g_shield_pos[0], g_shield_pos[1] - g_shield_model.tip * kShieldScale * 0.5f, g_shield_pos[2], kShieldScale,
+                        g_shield_yaw);
+}
 // ── Floor cleared ───────────────────────────────────────────────────────────────────────────
 
 // Once every monster on a floor is gone, a message says so. It waits half a second with the floor
@@ -2659,23 +3636,6 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
         }
     }
 
-    // Dark Cloud Enhanced's Babel's Spear: one hit in about seventeen stops every enemy on the
-    // floor for five seconds. One roll a step, however many it hits; bosses are left out.
-    constexpr int kBabelPercent = 6;
-    constexpr int kBabelFrames = 300;
-
-    if (held == ITEM_WEAPON_BABEL_S_SPEAR && NowMonstorUnit != nullptr && g_babel_rolled_step != g_step_count) {
-        g_babel_rolled_step = g_step_count;
-
-        if (std::rand() % 100 < kBabelPercent) {
-            for (MONSTOR &other : NowMonstorUnit->monster) {
-                if (other.state == 2 && other.kind == MONSTER_KIND_NORMAL) {
-                    other.stop_timer = std::max<int>(other.stop_timer, kBabelFrames);
-                }
-            }
-        }
-    }
-
     // Scorpion: when its poison takes hold, Ungaga's own poison is drawn out and the weapon
     // soaks up half the enemy's ABS.
     if (held == ITEM_WEAPON_SCORPION && poisoned && NowWeaponHave != nullptr) {
@@ -2827,10 +3787,11 @@ void DungeonStep() {
     ZeusStep(held);
     MirageStep();
     HerculesStep(HeldBy(CHARA_UNGAGA));
+    ColumnsStep();
     BladeStep(held);
     WiseOwlStep();
     WhpStep();
-    AngelGearStep();
+    ReflectorStep();
 
     // Atlamillia Insurance's notice, once the game's own break message has gone.
     if (!g_insured_notice.empty() && DngMessMan.timer <= 0) {
@@ -3261,6 +4222,8 @@ bool MonsterTarget(int monster_no, float *target) {
 }
 
 void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
+    ShieldBlow(attacker, at, radius);
+
     if (NowMonstorUnit == nullptr || NowColData == nullptr || damage <= 0 || !Attacks(attacker)) {
         return;
     }
@@ -4332,7 +5295,6 @@ void OnFloorStart() {
 
     g_carried_map = false;
     g_carried_crystal = false;
-    g_angel_steps = 0;
     g_curse.drain_steps = 0;
     g_owl_nearest = -1;
     g_owl_out_of_range = true;
@@ -4366,6 +5328,8 @@ void OnFloorStart() {
     ConfuseReset();
     FloorClearReset();
     MirageReset();
+    ColumnsReset();
+    ShieldReset();
     quest::EnhancedFloorStart();
 }
 
@@ -4379,6 +5343,36 @@ void DecoyDraw(const float *scene_ambient) {
     const float in = static_cast<float>(shown) / kMirageFadeSteps;
     const float out = static_cast<float>(g_mirage_steps) / kMirageFadeSteps;
     g_mirage_copy.Draw(scene_ambient, kMirageAlpha * std::clamp(std::min(in, out), 0.0f, 1.0f));
+}
+
+void ColumnDraw() {
+    ColumnsDraw();
+    ShieldDraw();
+}
+
+void OnHealCycle() {
+    // Angel Gear: each turn of the Heal ability's clock mends the whole party by 1 HP, the
+    // knocked out excepted, Xiao herself only when the weapon's own Heal is not live.
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || HeldBy(CHARA_XIAO) != ITEM_WEAPON_ANGE_GEAR ||
+        NowWeaponHave == nullptr) {
+        return;
+    }
+
+    const bool heal_live = (NowWeaponHave->flags & 0x800) != 0;
+
+    for (int chara = 0; chara < 6; chara++) {
+        if (chara == CHARA_XIAO && heal_live) {
+            continue;
+        }
+
+        if (UserStatus->hp[chara] > 0 && UserStatus->hp[chara] < UserStatus->max_hp[chara]) {
+            UserStatus->hp[chara]++;
+        }
+    }
+}
+
+bool MonsterBlocked(int monster_no) {
+    return NowMonstorUnit != nullptr && monster_no >= 0 && monster_no < 16 && ColumnBlocksMonster(monster_no);
 }
 
 } // namespace dc::game::expanded
