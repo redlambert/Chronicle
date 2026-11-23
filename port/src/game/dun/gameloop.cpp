@@ -2133,6 +2133,7 @@ void Draw_MainUnit() {
     }
 
     expanded::DecoyDraw(saved_ambient); // Dark Cloud Expanded: the Mirage's decoy.
+    expanded::ColumnDraw();             // Dark Cloud Expanded: Babel's Spear, the Cactus and the Terra Sword's rock.
 
     MGSetAmbient(saved_ambient);
     sceVu0CopyMatrix(light, saved_light);
@@ -3112,6 +3113,7 @@ void motionDrive() {
             expanded::OnHealTick();
         }
 
+        expanded::OnHealCycle(); // Dark Cloud Expanded: Angel Gear's party heal.
         heal_counter = 0;
     }
 
