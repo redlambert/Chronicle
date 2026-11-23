@@ -1110,6 +1110,12 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                         damage *= 2;
                     }
 
+                    // Dark Cloud Expanded: the Pocklekul's pockle strikes only the enemies.
+                    if (expanded::SparesPlayer(current_monster)) {
+                        expanded::OnMonsterAttack(current_monster, effect2[current_monster].position[i], effect2[current_monster].radius[i], damage);
+                        continue;
+                    }
+
                     int hit = NowColData->Set(effect2[current_monster].position[i], damage, 2, effect2[current_monster].radius[i], 0.0f, 1, effect2[current_monster].kind[i], effect2[current_monster].flags[i], 0);
                     NowColData->SetUserID(current_monster * 5 + 200, i);
 
@@ -1590,8 +1596,9 @@ MonsterDamageResult CMonstorUnit::CheckDmg() {
                         damage += damage * (0.015f * static_cast<float>(effectiveness[monster[index].attachment_kind]));
                     }
 
-                    // Dark Cloud Expanded: Toan's held sword may add to the hit (Sanctifier).
-                    if (owner == CHARA_TOAN) {
+                    // Dark Cloud Expanded: Toan's held sword may add to the hit (Sanctifier), and
+                    // Xiao's Super Steve carrying its sphere.
+                    if (owner == CHARA_TOAN || owner == CHARA_XIAO) {
                         damage = expanded::ToanDamage(damage, monster[index]);
                     }
 

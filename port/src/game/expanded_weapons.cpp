@@ -59,6 +59,41 @@ bool Is(int item_no, std::initializer_list<int> items) {
     return std::ranges::find(items, item_no) != items.end();
 }
 
+// ── Super Steve "Sphere Inheritance" ────────────────────────────────────────────────────────
+
+// Xiao's Super Steve carries the effect of the weapon its SynthSphere was made from: every check
+// below that asks what a character holds goes through EffectOf, which answers with the sphere's
+// weapon while she holds Super Steve. Toan's effects that work through his swings stay his (their
+// Xiao versions in Expanded are new shots of their own); the ones that work on kills, hits,
+// guards, ailments, chests and lock-on carry over.
+
+/**
+ * The weapon whose effect the active character carries.
+ */
+int ActiveEffect() {
+    return UserStatus != nullptr ? EffectOf(UserStatus->cur_chara) : -1;
+}
+
+/**
+ * The weapon whose effect a weapon record carries: its sphere's for Super Steve, else its own.
+ */
+int EffectItem(const WEAPON_HAVE *weapon) {
+    const int sphere = SphereWeapon(weapon);
+    return sphere > 0 ? sphere : weapon->item_no;
+}
+
+// Super Steve's pellets with a Baselard or Claymore sphere: the shove comes from this far behind.
+constexpr float kSphereKickBack = 4.0f;
+
+struct Pockle;
+bool IsPockle(const MONSTOR &monster);
+void PockleStep();
+void PockleReset();
+bool CatLaunch(const float *world, const float *vector, int damage);
+void CatStep();
+void CatDraw();
+void CatReset();
+
 // ── Dungeon messages ────────────────────────────────────────────────────────────────────────
 
 // Message numbers the mod's own lines take in the dungeon window, past every bank's own.
@@ -82,6 +117,9 @@ struct WeaponDescription {
 };
 
 constexpr WeaponDescription kDescriptions[] = {
+    {ITEM_WEAPON_DIVINEBEASTTITLE, "Charged shot becomes a\ncat that pounces on\nyour target."},
+    {ITEM_WEAPON_SUPER_STEVE, "Gains the effect of\nthe weapon whose\nSynthSphere it holds."},
+    {ITEM_WEAPON_POCKLEKUL, "Guard 1 sec: a pockle\nfights at your side."},
     {ITEM_WEAPON_BASELARD, "Heavy Hand: every hit\nknocks enemies far\nback."},
     {ITEM_WEAPON_GLADIUS, "Jacket Hunter: Master\nJackets give 4x ABS."},
     {ITEM_WEAPON_WISE_OWL_SWORD, "In Wise Owl Forest,\nwarns you when a key\nmonster is near."},
@@ -284,6 +322,7 @@ struct CurseState {
 };
 
 CurseState g_curse;
+CurseState g_curse_xiao; // Super Steve's, from an Evilcise or Maneater sphere
 
 // ── Wise Owl Sword "Wise Owl Always Knows" ──────────────────────────────────────────────────
 
@@ -307,17 +346,16 @@ void Curse(int chara) {
 }
 
 /**
- * The curse a held Evilcise or Maneater keeps on Toan.
+ * The curse a held Evilcise or Maneater keeps on chara: Toan, or Xiao by Super Steve's sphere.
  */
-void CurseStep(int held) {
-    const int chara = CHARA_TOAN;
+void CurseStep(int chara, int held, CurseState &curse) {
     const bool cursing = held == ITEM_WEAPON_EVILCISE || held == ITEM_WEAPON_MANEATER;
 
     if (!cursing) {
         // Put away: the sword takes its curse with it.
-        if (g_curse.item_no != -1) {
+        if (curse.item_no != -1) {
             Cure(chara, AILMENT_CURSE);
-            g_curse = {};
+            curse = {};
         }
 
         return;
@@ -325,11 +363,11 @@ void CurseStep(int held) {
 
     const bool knocked_out = (UserStatus->ailments[chara] & AILMENT_KNOCKED_OUT) != 0;
 
-    if (g_curse.item_no != held) {
-        g_curse = {};
-        g_curse.item_no = held;
-        g_curse.floor = UserStatus->cur_floor;
-        g_curse.was_knocked_out = knocked_out;
+    if (curse.item_no != held) {
+        curse = {};
+        curse.item_no = held;
+        curse.floor = UserStatus->cur_floor;
+        curse.was_knocked_out = knocked_out;
 
         if (!knocked_out) {
             Curse(chara);
@@ -338,26 +376,26 @@ void CurseStep(int held) {
         return;
     }
 
-    if (g_curse.floor != UserStatus->cur_floor) {
-        g_curse.floor = UserStatus->cur_floor;
-        g_curse.resolved = false;
-        g_curse.was_knocked_out = false;
+    if (curse.floor != UserStatus->cur_floor) {
+        curse.floor = UserStatus->cur_floor;
+        curse.resolved = false;
+        curse.was_knocked_out = false;
         Curse(chara);
     }
 
     if (knocked_out) {
-        g_curse.was_knocked_out = true;
-    } else if (g_curse.was_knocked_out) {
-        g_curse.was_knocked_out = false;
+        curse.was_knocked_out = true;
+    } else if (curse.was_knocked_out) {
+        curse.was_knocked_out = false;
 
-        if (!g_curse.resolved) {
+        if (!curse.resolved) {
             Curse(chara);
         }
-    } else if (!g_curse.resolved) {
+    } else if (!curse.resolved) {
         const bool cursed = (UserStatus->ailments[chara] & AILMENT_CURSE) != 0;
 
         if (!cursed) {
-            g_curse.resolved = true;
+            curse.resolved = true;
 
             // Jealous Soul: breaking its curse leaves Toan poisoned on 1 HP. Blood Price asks nothing.
             if (held == ITEM_WEAPON_EVILCISE) {
@@ -372,10 +410,10 @@ void CurseStep(int held) {
 
     // Blood Price: a worn-down Maneater feeds on Toan, 1 HP for 1 WHP a second, never below 1 HP.
     if (held == ITEM_WEAPON_MANEATER && NowWeaponHave != nullptr) {
-        g_curse.drain_steps++;
+        curse.drain_steps++;
 
-        if (g_curse.drain_steps >= kStepsPerSecond) {
-            g_curse.drain_steps = 0;
+        if (curse.drain_steps >= kStepsPerSecond) {
+            curse.drain_steps = 0;
             const float durability = NowWeaponHave->durability_f;
             const float max_durability = NowWeaponHave->durability;
 
@@ -1338,7 +1376,7 @@ constexpr int   kLockOnMotions[] = {19, 20, 21, 22, 8, 9, 10, 33};
 bool g_stride_held = false;
 
 void StrideStep() {
-    const bool grants = Is(HeldBy(CHARA_XIAO), {ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
+    const bool grants = Is(EffectOf(CHARA_XIAO), {ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
                                                 ITEM_WEAPON_ANGEL_SHOOTER, ITEM_WEAPON_ANGE_GEAR});
     const bool want = grants && lockOnTargetFlag != 0 && std::ranges::find(kLockOnMotions, CharaMain.motion_no) !=
                                                              std::end(kLockOnMotions);
@@ -1676,9 +1714,10 @@ CSHOT_EFFECT *LoadedEffect(const BT_SHOT_EFFECT *description) {
 constexpr float kStolenDamage = 2.0f;
 
 bool StealsShots(int owner) {
-    const int held = HeldBy(owner);
+    const int held = EffectOf(owner);
 
-    return (owner == CHARA_XIAO && held == ITEM_WEAPON_BANDIT_SLINGSHOT) ||
+    // Super Steve takes either thief's sphere.
+    return (owner == CHARA_XIAO && (held == ITEM_WEAPON_BANDIT_SLINGSHOT || held == ITEM_WEAPON_BANDIT_S_RING)) ||
            (owner == CHARA_RUBY && held == ITEM_WEAPON_BANDIT_S_RING);
 }
 
@@ -2022,12 +2061,77 @@ void ConfuseReset() {
     g_friendly_next = 0;
 }
 
+// ── Ruby's Pocklekul "Pockle Call" ──────────────────────────────────────────────────────────
+
+// Ruby's guard held a second summons one of the eight pockles at random (the seven days' and Hell
+// Pockle) in front of her; so does Xiao's, while Super Steve carries the Pocklekul's sphere. The
+// pockle is a real monster of the floor: its kind is loaded into a free kind slot the first time
+// it comes on a floor and it runs its own script, but it fights for the party. It goes for the
+// locked-on enemy, else the one nearest its summoner, and walks beside her when there is none.
+// Its blows only the enemies take, and an enemy it hits fights back; the party's own hits pass
+// through it, and it cannot be locked on to. It grows in over its first frames. One stands at a
+// time; it goes when the weapon or the character changes, when it falls, when it is left 300
+// units behind, and with the floor. It gives no ABS and drops nothing.
+// Left out against Expanded: the summon smoke and its tint, and the pockles' thrown shots (their
+// shots can only strike the party, so a summoned pockle does not shoot).
+
+constexpr std::array<int, 8>          kPockleKinds = {10, 11, 12, 13, 14, 15, 16, 54}; // MonstorTable: Sunday .. Saturday, Hell Pockle
+constexpr std::array<const char *, 8> kPockleNames = {"Sunday", "Monday", "Tuesday", "Wednesday",
+                                                      "Thursday", "Friday", "Saturday", "Hell Pockle"};
+constexpr int   kPockleGuardSteps = kStepsPerSecond;
+constexpr int   kPockleGrowSteps = 18;
+constexpr float kPockleGrowFrom = 0.1f;
+constexpr float kPockleLeftBehind = 300.0f;
+constexpr float kPockleSeek = 300.0f;
+constexpr float kPockleBeside = 18.0f;
+constexpr float kPockleAhead = 20.0f;
+constexpr int   kPockleModelRoom = 384 * 1024 / 16; // quads the floor's model buffer must have left
+
+struct Pockle {
+    int  monster = -1;  // its slot on the floor, or -1
+    int  summoner = -1; // the character who called it
+    int  age = 0;       // steps since it came
+    int  guard = 0;     // steps the guard has been held
+    bool cast = false;  // this guard has been spent
+};
+
+Pockle g_pockle;
+bool   g_quiet_load = false; // a pockle's kind is loading: the floor's own state stays
+
+bool IsPocklePos(int m) {
+    return g_pockle.monster >= 0 && m == g_pockle.monster;
+}
+
+bool IsPockle(const MONSTOR &monster) {
+    return g_pockle.monster >= 0 && NowMonstorUnit != nullptr && &monster == &NowMonstorUnit->monster[g_pockle.monster];
+}
+
+/**
+ * The pockle is on the floor and alive.
+ */
+bool PockleUp() {
+    if (g_pockle.monster < 0 || NowMonstorUnit == nullptr) {
+        return false;
+    }
+
+    const MONSTOR &monster = NowMonstorUnit->monster[g_pockle.monster];
+    return monster.state > 0 && monster.hp > 0;
+}
+
+/**
+ * An enemy that is up and fighting. The pockle is not one: nothing the party does seeks it out.
+ */
 bool ActiveMonster(int m) {
     const MONSTOR &monster = NowMonstorUnit->monster[m];
-    return monster.state == 2 && monster.hp > 0 && monster.revealed != 0;
+    return monster.state == 2 && monster.hp > 0 && monster.revealed != 0 && !IsPocklePos(m);
 }
 
 bool Confused(int m) {
+    // The pockle fights the enemies for as long as it stands, as a confused one does.
+    if (IsPocklePos(m)) {
+        return PockleUp();
+    }
+
     return NowMonstorUnit != nullptr && m >= 0 && m < 16 && g_confused_until[m] > g_step_count && ActiveMonster(m);
 }
 
@@ -2201,6 +2305,275 @@ void ConfuseStep() {
         }
 
         list.count = kept;
+    }
+}
+
+// ── The pockle's summon and its life ────────────────────────────────────────────────────────
+
+/**
+ * Who would call a pockle now: Ruby holding the Pocklekul, or Xiao with its sphere on Super
+ * Steve. -1 for nobody.
+ */
+int PockleSummoner() {
+    if (UserStatus == nullptr) {
+        return -1;
+    }
+
+    const int chara = UserStatus->cur_chara;
+
+    if ((chara == CHARA_RUBY || chara == CHARA_XIAO) && EffectOf(chara) == ITEM_WEAPON_POCKLEKUL) {
+        return chara;
+    }
+
+    return -1;
+}
+
+/**
+ * Takes the pockle off the floor, as the floor's clean-up does for every monster.
+ */
+void PockleEnd() {
+    if (g_pockle.monster >= 0 && NowMonstorUnit != nullptr) {
+        CMonstorUnit &unit = *NowMonstorUnit;
+        const int     m = g_pockle.monster;
+        MONSTOR      &monster = unit.monster[m];
+
+        if (monster.state > 0) {
+            if (monster.hp > 0) {
+                unit.alive_count--;
+            }
+
+            monster.state = -1;
+            unit.script_state[m] = 0;
+
+            for (int j = 0; j < 16; j++) {
+                unit.effect[m].timer[j] = 0;
+                unit.effect2[m].active[j] = 0;
+            }
+
+            for (int j = 0; j < 12; j++) {
+                unit.effect3[m].frame[j] = nullptr;
+                unit.effect3[m].timer[j] = 0;
+            }
+
+            unit.effect3[m].count = 0;
+            unit.event[m].frame = nullptr;
+            unit.event[m].timer = 0;
+            unit.event2[m].frame = nullptr;
+            unit.event2[m].timer = 0;
+        }
+
+        g_hit_by[m] = {};
+    }
+
+    g_pockle.monster = -1;
+    g_pockle.summoner = -1;
+    g_pockle.age = 0;
+}
+
+void PockleReset() {
+    // A new floor's clean-up has taken it already.
+    g_pockle = {};
+}
+
+/**
+ * The floor's kind slot holding this pockle, loading it into a free one the first time it comes
+ * on the floor. -1 when there is no room.
+ */
+int PockleKindSlot(int kind) {
+    CMonstorUnit        &unit = *NowMonstorUnit;
+    MONSTOR_MODEL       &description = MonstorTable[kind];
+
+    for (int slot = 0; slot < unit.model_count && slot < 9; slot++) {
+        if (unit.model[slot].name_no == description.name_no && unit.script_data[slot] != nullptr) {
+            return slot;
+        }
+    }
+
+    if (unit.model_count >= 9) {
+        std::printf("[Expanded] Pocklekul: no free monster kind slot on this floor\n");
+        return -1;
+    }
+
+    if (MonstorModelBuffer.limit > 0 && MonstorModelBuffer.limit - MonstorModelBuffer.used < kPockleModelRoom) {
+        std::printf("[Expanded] Pocklekul: the floor's model buffer is full (%d of %d)\n", MonstorModelBuffer.used,
+                    MonstorModelBuffer.limit);
+        return -1;
+    }
+
+    // Loaded without its shots: a monster's shots only ever strike the party.
+    const s16 shots[2] = {description.shot_effect[0], description.shot_effect[1]};
+    description.shot_effect[0] = -1;
+    description.shot_effect[1] = -1;
+
+    const int slot = unit.model_count;
+    g_quiet_load = true;
+    unit.SetupBaseModel(slot, kind, 0x26, &MonstorModelBuffer);
+    g_quiet_load = false;
+
+    description.shot_effect[0] = shots[0];
+    description.shot_effect[1] = shots[1];
+
+    if (unit.model_count != slot + 1 || unit.script_data[slot] == nullptr) {
+        std::printf("[Expanded] Pocklekul: kind %d did not load\n", kind);
+        return -1;
+    }
+
+    std::printf("[Expanded] Pocklekul: kind %d loaded into slot %d (model buffer %d of %d)\n", kind, slot,
+                MonstorModelBuffer.used, MonstorModelBuffer.limit);
+    return slot;
+}
+
+void PockleSummon(int summoner) {
+    CMonstorUnit &unit = *NowMonstorUnit;
+    const int     pick = std::rand() % static_cast<int>(kPockleKinds.size());
+    const int     slot = PockleKindSlot(kPockleKinds[pick]);
+
+    if (slot < 0) {
+        return;
+    }
+
+    float at[4] = {CharaMain.pos[0] + std::sin(CharaMain.rotation.y) * kPockleAhead, CharaMain.pos[1],
+                   CharaMain.pos[2] + std::cos(CharaMain.rotation.y) * kPockleAhead, 1.0f};
+
+    if (unit.SetupViewMonstor(slot, at, 0) == 0) {
+        std::printf("[Expanded] Pocklekul: no free monster slot on this floor\n");
+        return;
+    }
+
+    const int m = unit.current_monster;
+    MONSTOR  &monster = unit.monster[m];
+
+    // Nothing to win from it, and nothing to lock on to.
+    monster.exp = 0;
+    monster.money = 0;
+    monster.money_chance = 0;
+    monster.drops_items = 0;
+    monster.rare_item = -1;
+    monster.steal_item = -1;
+    monster.kind = MONSTER_KIND_NO_LOCK_ON;
+    monster.lockon_enabled = false;
+    monster.shot_effect = -1;
+    monster.shot_effect2 = -1;
+
+    unit.chara[m][0].SetRotation(0.0f, CharaMain.rotation.y, 0.0f);
+    unit.chara[m][0].SetScale(kPockleGrowFrom, kPockleGrowFrom, kPockleGrowFrom);
+
+    g_pockle.monster = m;
+    g_pockle.summoner = summoner;
+    g_pockle.age = 0;
+    g_hit_by[m] = {};
+
+    setUnitAmbientAnime(15.0f, 1.0f, 150.0f, 100.0f, 120.0f);
+    ShowDungeonMessage(std::format("{} summoned", kPockleNames[pick]), 150);
+}
+
+/**
+ * What the pockle goes for: the locked-on enemy, else the one nearest its summoner. -1 for none.
+ */
+int PockleTarget() {
+    const int locked = LockedTarget();
+
+    if (locked >= 0 && ActiveMonster(locked)) {
+        return locked;
+    }
+
+    int   best = -1;
+    float best_distance = kPockleSeek * kPockleSeek;
+
+    for (int m = 0; m < 16; m++) {
+        if (!ActiveMonster(m)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(m, at);
+        const float dx = at[0] - CharaMain.pos[0];
+        const float dz = at[2] - CharaMain.pos[2];
+        const float distance = dx * dx + dz * dz;
+
+        if (distance < best_distance) {
+            best_distance = distance;
+            best = m;
+        }
+    }
+
+    return best;
+}
+
+/**
+ * The point the pockle's script moves to: its enemy, or beside its summoner.
+ */
+void PockleAim(float *target) {
+    const int victim = PockleTarget();
+
+    if (victim >= 0) {
+        float me[4];
+        MonsterPosition(g_pockle.monster, me);
+        AimAt(victim, me, target);
+        return;
+    }
+
+    const float yaw = CharaMain.rotation.y;
+    target[0] = CharaMain.pos[0] + std::cos(yaw) * kPockleBeside;
+    target[1] = CharaMain.pos[1];
+    target[2] = CharaMain.pos[2] - std::sin(yaw) * kPockleBeside;
+    target[3] = 1.0f;
+}
+
+void PockleStep() {
+    if (NowMonstorUnit == nullptr || UserStatus == nullptr) {
+        return;
+    }
+
+    const int summoner = PockleSummoner();
+
+    // It stands while its summoner is out with the weapon, alive, and near.
+    if (g_pockle.monster >= 0) {
+        bool ends = summoner < 0 || summoner != g_pockle.summoner || !PockleUp();
+
+        if (!ends) {
+            float at[4];
+            MonsterPosition(g_pockle.monster, at);
+            const float dx = at[0] - CharaMain.pos[0];
+            const float dz = at[2] - CharaMain.pos[2];
+
+            if (dx * dx + dz * dz > kPockleLeftBehind * kPockleLeftBehind) {
+                std::printf("[Expanded] Pocklekul: the pockle was left behind\n");
+                ends = true;
+            }
+        }
+
+        if (ends) {
+            // One that fell is the game's to clear away.
+            if (PockleUp()) {
+                PockleEnd();
+            } else {
+                g_pockle.monster = -1;
+                g_pockle.summoner = -1;
+            }
+        } else if (g_pockle.age < kPockleGrowSteps) {
+            g_pockle.age++;
+            const float share = static_cast<float>(g_pockle.age) / kPockleGrowSteps;
+            const float size = kPockleGrowFrom + (1.0f - kPockleGrowFrom) * share;
+            NowMonstorUnit->chara[g_pockle.monster][0].SetScale(size, size, size);
+        }
+    }
+
+    if (summoner < 0 || BtActStatus.guard_mode != kGuarding) {
+        g_pockle.guard = 0;
+        g_pockle.cast = false;
+        return;
+    }
+
+    // The guard's charge: a second, then the flash and the summon unless one stands.
+    if (g_pockle.cast || ++g_pockle.guard < kPockleGuardSteps) {
+        return;
+    }
+
+    g_pockle.cast = true;
+
+    if (g_pockle.monster < 0) {
+        PockleSummon(summoner);
     }
 }
 
@@ -3007,7 +3380,7 @@ std::vector<CaughtShot> g_caught;
 int                     g_reflect_ready = 0;
 
 bool ReflectorHeld() {
-    return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && HeldBy(CHARA_XIAO) == ITEM_WEAPON_ANGE_GEAR;
+    return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && EffectOf(CHARA_XIAO) == ITEM_WEAPON_ANGE_GEAR;
 }
 
 void ShieldReset() {
@@ -3299,6 +3672,456 @@ void EmptySphereDetach(WEAPON_HAVE *weapon, int hole) {
     SphereLevels(weapon) = 0;
 }
 
+// ── Xiao's Divine Beast Title "Spirit Beast" ────────────────────────────────────────────────
+
+// The charged shot leaves the slingshot as Xiao's cat form instead of a pellet: an animated copy
+// of the town cat (gedit/s86/chara/c04cat.chr) that grows in over its first frames as it flies
+// the pellet's line, falls under its own weight, lands, walks to the locked-on enemy (else the
+// one nearest Xiao), crouches and leaps on it for the charged shot's damage with a heavy kick,
+// then fades. With nothing to chase it sits and looks again every half second. It strikes at
+// once whatever it touches in flight, fades after ten seconds, and goes with Xiao or the floor.
+// Super Steve carrying the Divine Beast Title's sphere fires it too.
+// Left out against Expanded: the wings, mask, cape and glow of its baked model (this is the
+// plain town cat), the float-up leap clip (it leaps in its own leap clip), a floor probe (it walks
+// on the height Xiao stood at), and the pellet shrinking away as the cat grows on it.
+
+constexpr int   kCatTextureBlock = 0x31;
+constexpr int   kCatFileBytes = 1536 * 1024;
+constexpr int   kCatModelBytes = 2048 * 1024;
+constexpr int   kCatGrowSteps = 6;
+constexpr int   kCatFlySteps = 24;
+constexpr float kCatFlySpeed = 4.0f;
+constexpr float kCatFallGravity = 0.08f;
+constexpr float kCatAirDrag = 0.96f;
+constexpr int   kCatLandSteps = 33;
+constexpr float kCatWalkSpeed = 0.9f;
+constexpr float kCatPounceRange = 30.0f;
+constexpr int   kCatReadySteps = 25;
+constexpr int   kCatLeapSteps = 32;
+constexpr float kCatLeapHeight = 6.4f;
+constexpr float kCatTouch = 3.0f;
+constexpr float kCatHitReach = 12.0f;
+constexpr float kCatKick = 2.0f;
+constexpr float kCatSeek = 300.0f;
+constexpr int   kCatSitLook = kStepsPerSecond / 2;
+constexpr int   kCatLifeSteps = 10 * kStepsPerSecond;
+constexpr int   kCatFadeSteps = 14;
+
+// The town cat's clips, in its own frames.
+struct CatClip {
+    int   start;
+    int   end;
+    float speed;
+    bool  loops;
+};
+
+enum CatClipNo { kCatStand, kCatReady, kCatRun, kCatLeap, kCatLand, kCatWalk, kCatSit };
+
+constexpr std::array<CatClip, 7> kCatClips = {{
+    {10, 20, 0.1f, true},    // stand
+    {95, 105, 0.4f, false},  // ready crouch
+    {120, 136, 0.5f, true},  // run
+    {205, 214, 0.5f, false}, // leap
+    {215, 227, 0.36f, false},// land
+    {60, 80, 1.0f, true},    // walk
+    {30, 40, 0.1f, true},    // sit
+}};
+
+enum class CatPhase { None, Fly, Fall, Land, Seek, Ready, Leap, Sit, Fade };
+
+struct Cat {
+    CatPhase phase = CatPhase::None;
+    float    pos[3] = {};
+    float    vel[3] = {};
+    float    yaw = 0.0f;
+    float    scale = 1.0f;
+    float    ground = 0.0f;
+    float    from[3] = {};   // the leap's start
+    float    to[3] = {};     // the leap's end
+    int      age = 0;
+    int      steps = 0;      // in the phase
+    int      target = -1;
+    int      damage = 0;
+    int      clip = -1;
+};
+
+alignas(64) u_long128 g_cat_file[kCatFileBytes / 16];
+alignas(64) u_long128 g_cat_work[kCatFileBytes / 16];
+alignas(64) u_long128 g_cat_model_bytes[kCatModelBytes / 16];
+int                   g_cat_file_size = 0;
+bool                  g_cat_file_tried = false;
+CDataAlloc2<1>        g_cat_alloc;
+CCharacter            g_cat_chara;
+int                   g_cat_loaded_floor = -1; // the floor the model was loaded for
+int                   g_cat_motion_no = -1;
+Cat                   g_cat;
+
+/**
+ * Loads the town cat for this floor: the file once a session, the model and its picture again on
+ * each floor, whose texture blocks are rebuilt.
+ */
+bool CatModel() {
+    if (UserStatus == nullptr) {
+        return false;
+    }
+
+    if (!g_cat_file_tried) {
+        g_cat_file_tried = true;
+        char path[] = "gedit/s86/chara/c04cat.chr";
+
+        if (LoadFileBG(path, g_cat_file, &g_cat_file_size) == 0 || g_cat_file_size <= 0 || g_cat_file_size > kCatFileBytes) {
+            g_cat_file_size = 0;
+        }
+
+        std::printf("[Expanded] Divine Beast Title cat %s (%d bytes)\n", g_cat_file_size > 0 ? "loaded" : "NOT FOUND",
+                    g_cat_file_size);
+    }
+
+    if (g_cat_file_size <= 0) {
+        return false;
+    }
+
+    const int floor = UserStatus->cur_floor + 100 * selectMapNo;
+
+    if (g_cat_loaded_floor == floor) {
+        return g_cat_chara.frame != nullptr;
+    }
+
+    g_cat_loaded_floor = floor;
+
+    // The pack is worked on in a copy, as the game loads every pack fresh from the disc.
+    std::memcpy(g_cat_work, g_cat_file, static_cast<size_t>(g_cat_file_size));
+    auto *pack = reinterpret_cast<u_int *>(g_cat_work);
+
+    // Its configuration, whatever the pack calls it.
+    char  cfg_name[64] = "info.cfg";
+    int   cfg_size = 0;
+
+    if (GetPackFile(pack, cfg_name, &cfg_size) == nullptr) {
+        for (int index = 0; index < 64; index++) {
+            char *name = nullptr;
+            int   size = 0;
+
+            if (GetPackFile(pack, index, &name, &size) == nullptr || name == nullptr) {
+                break;
+            }
+
+            const std::string_view entry(name);
+
+            if (entry.size() > 4 && entry.substr(entry.size() - 4) == ".cfg") {
+                std::snprintf(cfg_name, sizeof(cfg_name), "%s", name);
+                break;
+            }
+        }
+    }
+
+    TexManager.DeleteTextureBlock(kCatTextureBlock);
+    g_cat_alloc.base = reinterpret_cast<u_char *>(g_cat_model_bytes);
+    g_cat_alloc.used = 0;
+    g_cat_alloc.limit = kCatModelBytes / 16;
+    g_cat_chara.Initialize();
+    g_cat_chara.LoadPackData3(pack, cfg_name, &g_cat_alloc, kCatTextureBlock, &g_cat_alloc, 1, 0);
+
+    g_cat_motion_no = g_cat_chara.motion_start[0] >= 0 ? g_cat_chara.motion_start[0] : 0;
+    std::printf("[Expanded] Divine Beast Title cat model %s (%s, motion %d, %d of %d quads)\n",
+                g_cat_chara.frame != nullptr ? "ready" : "FAILED", cfg_name, g_cat_motion_no, g_cat_alloc.used,
+                g_cat_alloc.limit);
+    return g_cat_chara.frame != nullptr;
+}
+
+/**
+ * Plays one of the cat's clips through its first motion, whose frame window is set to the clip.
+ */
+void CatPlay(int clip) {
+    if (g_cat.clip == clip) {
+        return;
+    }
+
+    g_cat.clip = clip;
+    MOTION_INFO *info = g_cat_chara.motion_type.motion_info;
+
+    if (info == nullptr) {
+        return;
+    }
+
+    const CatClip &want = kCatClips[clip];
+    info[0].start = want.start;
+    info[0].end = want.end;
+    info[0].speed = want.speed;
+    g_cat_chara.SetMotion(g_cat_motion_no, want.loops ? 4 : 4 | 2);
+}
+
+void CatReset() {
+    g_cat = {};
+    g_cat_chara.fade_out = 0;
+}
+
+void CatFade() {
+    g_cat.phase = CatPhase::Fade;
+    g_cat.steps = 0;
+    g_cat_chara.fade[3] = 0.0f;
+    g_cat_chara.fade_out = 1;
+}
+
+/**
+ * The enemy the cat goes for: the locked-on one, else the one nearest Xiao. -1 for none.
+ */
+int CatTarget() {
+    const int locked = LockedTarget();
+
+    if (locked >= 0 && ActiveMonster(locked)) {
+        return locked;
+    }
+
+    int   best = -1;
+    float best_distance = kCatSeek * kCatSeek;
+
+    for (int m = 0; m < 16 && NowMonstorUnit != nullptr; m++) {
+        if (!ActiveMonster(m)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(m, at);
+        const float dx = at[0] - CharaMain.pos[0];
+        const float dz = at[2] - CharaMain.pos[2];
+
+        if (dx * dx + dz * dz < best_distance) {
+            best_distance = dx * dx + dz * dz;
+            best = m;
+        }
+    }
+
+    return best;
+}
+
+void CatStrike(int m) {
+    const float origin[4] = {g_cat.pos[0], g_cat.pos[1], g_cat.pos[2], 1.0f};
+    PlantHitNear(m, g_cat.pos[0], g_cat.pos[2], kCatHitReach, g_cat.damage, origin, kCatKick, false);
+    CatFade();
+}
+
+void CatFace(float dx, float dz) {
+    if (dx * dx + dz * dz > 1e-4f) {
+        g_cat.yaw = std::atan2(dx, dz);
+    }
+}
+
+bool CatLaunch(const float *world, const float *vector, int damage) {
+    if (!CatModel()) {
+        return false;
+    }
+
+    const float length = std::sqrt(vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]);
+
+    if (length < 1e-3f) {
+        return false;
+    }
+
+    g_cat = {};
+    g_cat.phase = CatPhase::Fly;
+
+    for (int axis = 0; axis < 3; axis++) {
+        g_cat.pos[axis] = world[axis];
+        g_cat.vel[axis] = vector[axis] / length * kCatFlySpeed;
+    }
+
+    g_cat.ground = CharaMain.pos[1];
+    g_cat.damage = std::max(1, damage);
+    g_cat.scale = 0.05f;
+    CatFace(g_cat.vel[0], g_cat.vel[2]);
+    g_cat_chara.fade_out = 0;
+    g_cat_chara.fade[0] = 1.0f;
+    CatPlay(kCatRun);
+    return true;
+}
+
+void CatStep() {
+    if (g_cat.phase == CatPhase::None) {
+        return;
+    }
+
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || NowMonstorUnit == nullptr) {
+        CatReset();
+        return;
+    }
+
+    g_cat.age++;
+    g_cat.steps++;
+
+    if (g_cat.phase != CatPhase::Fade && g_cat.age > kCatLifeSteps) {
+        CatFade();
+    }
+
+    switch (g_cat.phase) {
+        case CatPhase::Fly:
+        case CatPhase::Fall: {
+            g_cat.scale = std::min(1.0f, static_cast<float>(g_cat.age) / kCatGrowSteps);
+
+            if (g_cat.phase == CatPhase::Fall) {
+                g_cat.vel[0] *= kCatAirDrag;
+                g_cat.vel[2] *= kCatAirDrag;
+                g_cat.vel[1] -= kCatFallGravity;
+            }
+
+            for (int axis = 0; axis < 3; axis++) {
+                g_cat.pos[axis] += g_cat.vel[axis];
+            }
+
+            // Whatever it flies into, it strikes.
+            for (int m = 0; m < 16; m++) {
+                if (ActiveMonster(m) && InsideMonster(m, g_cat.pos, kCatTouch)) {
+                    CatStrike(m);
+                    return;
+                }
+            }
+
+            if (g_cat.phase == CatPhase::Fly && g_cat.steps >= kCatFlySteps) {
+                g_cat.phase = CatPhase::Fall;
+                g_cat.steps = 0;
+                g_cat.vel[1] = std::min(g_cat.vel[1], 0.0f);
+                CatPlay(kCatLeap);
+            }
+
+            if (g_cat.pos[1] <= g_cat.ground) {
+                g_cat.pos[1] = g_cat.ground;
+                g_cat.phase = CatPhase::Land;
+                g_cat.steps = 0;
+                CatPlay(kCatLand);
+            }
+
+            break;
+        }
+
+        case CatPhase::Land:
+            if (g_cat.steps >= kCatLandSteps) {
+                g_cat.phase = CatPhase::Seek;
+                g_cat.steps = 0;
+            }
+
+            break;
+
+        case CatPhase::Sit:
+            if (g_cat.steps < kCatSitLook) {
+                break;
+            }
+
+            g_cat.phase = CatPhase::Seek;
+            g_cat.steps = 0;
+            [[fallthrough]];
+
+        case CatPhase::Seek: {
+            if (g_cat.target < 0 || !ActiveMonster(g_cat.target)) {
+                g_cat.target = CatTarget();
+            }
+
+            if (g_cat.target < 0) {
+                g_cat.phase = CatPhase::Sit;
+                g_cat.steps = 0;
+                CatPlay(kCatSit);
+                break;
+            }
+
+            float at[4];
+            MonsterPosition(g_cat.target, at);
+            const float dx = at[0] - g_cat.pos[0];
+            const float dz = at[2] - g_cat.pos[2];
+            const float distance = std::sqrt(dx * dx + dz * dz);
+            CatFace(dx, dz);
+
+            if (distance <= kCatPounceRange) {
+                g_cat.phase = CatPhase::Ready;
+                g_cat.steps = 0;
+                CatPlay(kCatReady);
+                break;
+            }
+
+            g_cat.pos[0] += dx / distance * kCatWalkSpeed;
+            g_cat.pos[2] += dz / distance * kCatWalkSpeed;
+            CatPlay(kCatWalk);
+            break;
+        }
+
+        case CatPhase::Ready: {
+            if (!ActiveMonster(g_cat.target)) {
+                g_cat.phase = CatPhase::Seek;
+                g_cat.steps = 0;
+                break;
+            }
+
+            float at[4];
+            MonsterPosition(g_cat.target, at);
+            CatFace(at[0] - g_cat.pos[0], at[2] - g_cat.pos[2]);
+
+            if (g_cat.steps >= kCatReadySteps) {
+                g_cat.phase = CatPhase::Leap;
+                g_cat.steps = 0;
+                std::memcpy(g_cat.from, g_cat.pos, sizeof(g_cat.from));
+                AimAt(g_cat.target, g_cat.pos, at);
+                std::memcpy(g_cat.to, at, sizeof(g_cat.to));
+                CatPlay(kCatLeap);
+            }
+
+            break;
+        }
+
+        case CatPhase::Leap: {
+            // It homes on the enemy as it moves, along an arc to the point it aimed for.
+            if (ActiveMonster(g_cat.target)) {
+                float at[4];
+                AimAt(g_cat.target, g_cat.pos, at);
+                std::memcpy(g_cat.to, at, sizeof(g_cat.to));
+            }
+
+            const float t = std::min(1.0f, static_cast<float>(g_cat.steps) / kCatLeapSteps);
+
+            for (int axis = 0; axis < 3; axis++) {
+                g_cat.pos[axis] = g_cat.from[axis] + (g_cat.to[axis] - g_cat.from[axis]) * t;
+            }
+
+            g_cat.pos[1] += kCatLeapHeight * 4.0f * t * (1.0f - t);
+            CatFace(g_cat.to[0] - g_cat.from[0], g_cat.to[2] - g_cat.from[2]);
+
+            if (ActiveMonster(g_cat.target) && (t >= 1.0f || InsideMonster(g_cat.target, g_cat.pos, kCatTouch))) {
+                CatStrike(g_cat.target);
+            } else if (t >= 1.0f) {
+                g_cat.pos[1] = std::max(g_cat.ground, g_cat.pos[1]);
+                g_cat.phase = CatPhase::Land;
+                g_cat.steps = 0;
+                g_cat.target = -1;
+                CatPlay(kCatLand);
+            }
+
+            break;
+        }
+
+        case CatPhase::Fade:
+            if (g_cat.steps >= kCatFadeSteps) {
+                CatReset();
+            }
+
+            break;
+
+        case CatPhase::None:
+            break;
+    }
+}
+
+void CatDraw() {
+    if (g_cat.phase == CatPhase::None || g_cat_chara.frame == nullptr || UserStatus == nullptr ||
+        UserStatus->cur_chara != CHARA_XIAO) {
+        return;
+    }
+
+    const float size = std::max(0.01f, g_cat.scale);
+    g_cat_chara.SetPosition(g_cat.pos[0], g_cat.pos[1], g_cat.pos[2]);
+    g_cat_chara.SetRotation(0.0f, g_cat.yaw, 0.0f);
+    g_cat_chara.SetScale(size, size, size);
+    TexManager.ReloadTexture(Vif1Packet, kCatTextureBlock);
+    g_cat_chara.Step();
+    g_cat_chara.Draw();
+}
+
 } // namespace
 
 // ── Who holds what ──────────────────────────────────────────────────────────────────────────
@@ -3461,12 +4284,12 @@ int ToanAttack(int attack) {
 
 float LockOnRate() {
     // Sanctifier's reach, which Big Bang and the Sword of Zeus carry on.
-    if (LongLockOn(ToanWeapon())) {
+    if (LongLockOn(ActiveEffect())) {
         return 2.0f;
     }
 
     // Flamingo: Xiao locks on from twice as far, and so do the Dragon's Y's line.
-    if (Is(HeldBy(CHARA_XIAO), {ITEM_WEAPON_FLAMINGO, ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
+    if (Is(EffectOf(CHARA_XIAO), {ITEM_WEAPON_FLAMINGO, ITEM_WEAPON_DRAGON_S_Y, ITEM_WEAPON_DIVINEBEASTTITLE,
                                 ITEM_WEAPON_ANGEL_SHOOTER, ITEM_WEAPON_ANGE_GEAR})) {
         return 2.0f;
     }
@@ -3480,6 +4303,36 @@ int HeldBy(int chara) {
     }
 
     return NowWeaponHave->item_no;
+}
+
+int SphereWeapon(const WEAPON_HAVE *weapon) {
+    if (weapon == nullptr || weapon->item_no != ITEM_WEAPON_SUPER_STEVE) {
+        return -1;
+    }
+
+    // A weapon holds one SynthSphere at most; the weapon it was made from names the effect.
+    for (const ATTACH_LIST &attach : weapon->attach) {
+        if (attach.item_no == ITEM_ATTACH_SYNTHESIS_SPHERE && attach.sphere_weapon_no > 0 &&
+            attach.sphere_weapon_no != ITEM_WEAPON_SUPER_STEVE) {
+            return attach.sphere_weapon_no;
+        }
+    }
+
+    return -1;
+}
+
+int EffectOf(int chara) {
+    const int held = HeldBy(chara);
+
+    if (chara == CHARA_XIAO && held == ITEM_WEAPON_SUPER_STEVE) {
+        const int sphere = SphereWeapon(NowWeaponHave);
+
+        if (sphere > 0) {
+            return sphere;
+        }
+    }
+
+    return held;
 }
 
 void UngagaSwingStep() {
@@ -3544,7 +4397,7 @@ int GoroAttack(int attack) {
 
 float EnemyDefense(float defense, const MONSTOR &monster, int owner) {
     // Javelin: a sea enemy has no defense against it.
-    if (owner >= 0 && HeldBy(owner) == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
+    if (owner >= 0 && EffectOf(owner) == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
         return 0.0f;
     }
 
@@ -3556,7 +4409,7 @@ void OnEnemyHit(MONSTOR &monster, int owner, bool poisoned) {
         return;
     }
 
-    const int held = HeldBy(owner);
+    const int held = EffectOf(owner);
 
     // Snail: one hit in twenty leaves the enemy stuck in its slime.
     constexpr int kSnailGooPercent = 5;
@@ -3662,15 +4515,15 @@ void OnEnemyDamaged(const MONSTOR &monster, int owner, int amount) {
     constexpr std::array<s16, 20> kDry = {1, 3, 5, 25, 30, 31, 32, 33, 40, 55, 64, 69, 70, 77, 90, 91, 303, 317, 318, 319};
     static int last_step = -1;
 
-    if (owner != CHARA_UNGAGA || amount <= 0 || HeldBy(CHARA_UNGAGA) != ITEM_WEAPON_CACTUS || last_step == g_step_count ||
-        std::ranges::find(kDry, monster.name_no) != kDry.end()) {
+    if ((owner != CHARA_UNGAGA && owner != CHARA_XIAO) || amount <= 0 || EffectOf(owner) != ITEM_WEAPON_CACTUS ||
+        last_step == g_step_count || std::ranges::find(kDry, monster.name_no) != kDry.end()) {
         return;
     }
 
     last_step = g_step_count;
 
-    float      &water = UserStatus->water_now[CHARA_UNGAGA];
-    const float most = UserStatus->water_max[CHARA_UNGAGA];
+    float      &water = UserStatus->water_now[owner];
+    const float most = UserStatus->water_max[owner];
 
     if (water < most) {
         water = std::min(most, water + static_cast<float>(amount) / 10.0f);
@@ -3681,7 +4534,7 @@ float WearAmount(float amount) {
     // Steel Slingshot: once its WHP is down to a tenth, each shot wears it half as much.
     constexpr float kLowShare = 0.1f;
 
-    const int held = HeldBy(CHARA_XIAO);
+    const int held = EffectOf(CHARA_XIAO);
 
     if (held == ITEM_WEAPON_STEEL_SLINGSHOT &&
         NowWeaponHave->durability_f <= kLowShare * static_cast<float>(NowWeaponHave->durability)) {
@@ -3772,14 +4625,18 @@ void DungeonStep() {
 
     const int held = ToanWeapon();
 
-    // Hero's Courage: Freeze, Poison, Curse and Goo slide off Toan.
-    if (held == ITEM_WEAPON_BRAVE_ARK) {
-        Cure(CHARA_TOAN, AILMENT_FREEZE | AILMENT_POISON | AILMENT_CURSE | AILMENT_GOO);
+    // Hero's Courage: Freeze, Poison, Curse and Goo slide off Toan, and off Xiao while Super
+    // Steve carries the Brave Ark's sphere.
+    if (ActiveEffect() == ITEM_WEAPON_BRAVE_ARK) {
+        Cure(UserStatus->cur_chara, AILMENT_FREEZE | AILMENT_POISON | AILMENT_CURSE | AILMENT_GOO);
     }
 
     // The curses follow Toan's own weapon whoever is out, so an ally's turn does not lift them.
+    // Super Steve with an Evilcise or Maneater sphere curses Xiao the same way.
     if (UserStatus->cur_chara == CHARA_TOAN) {
-        CurseStep(held);
+        CurseStep(CHARA_TOAN, held, g_curse);
+    } else if (UserStatus->cur_chara == CHARA_XIAO) {
+        CurseStep(CHARA_XIAO, EffectOf(CHARA_XIAO), g_curse_xiao);
     }
 
     TyphoonStep(held);
@@ -3808,6 +4665,8 @@ void DungeonStep() {
     quest::EnhancedDungeonStep();
     TornadoStep();
     TunaStep();
+    PockleStep();
+    CatStep();
 }
 
 void SpringStep(bool in_spring) {
@@ -3836,7 +4695,8 @@ void SpringStep(bool in_spring) {
 }
 
 bool AilmentBlocked(int ailment) {
-    const int held = ToanWeapon();
+    const int held = ActiveEffect();
+    const int chara = UserStatus != nullptr ? UserStatus->cur_chara : CHARA_TOAN;
 
     // Hero's Courage.
     if (held == ITEM_WEAPON_BRAVE_ARK && (ailment & (AILMENT_FREEZE | AILMENT_POISON | AILMENT_CURSE | AILMENT_GOO)) != 0) {
@@ -3844,7 +4704,7 @@ bool AilmentBlocked(int ailment) {
     }
 
     // Jealous Soul: while its curse holds, nothing else takes.
-    if (held == ITEM_WEAPON_EVILCISE && ailment != AILMENT_CURSE && (UserStatus->ailments[CHARA_TOAN] & AILMENT_CURSE) != 0) {
+    if (held == ITEM_WEAPON_EVILCISE && ailment != AILMENT_CURSE && (UserStatus->ailments[chara] & AILMENT_CURSE) != 0) {
         return true;
     }
 
@@ -3855,12 +4715,12 @@ int DefenseBonus() {
     // Defensive Legacy: Aga's Sword gives Toan 15 defense.
     constexpr int kAgasDefense = 15;
 
-    return ToanWeapon() == ITEM_WEAPON_AGA_S_SWORD ? kAgasDefense : 0;
+    return ActiveEffect() == ITEM_WEAPON_AGA_S_SWORD ? kAgasDefense : 0;
 }
 
 float ToanDamage(float damage, const MONSTOR &monster) {
     // Sanctifier: about twice the damage against the undead.
-    if (Sanctifier(ToanWeapon()) && monster.attachment_kind == MONSTER_FAMILY_UNDEAD) {
+    if (Sanctifier(ActiveEffect()) && monster.attachment_kind == MONSTER_FAMILY_UNDEAD) {
         damage *= 2.0f;
     }
 
@@ -3869,12 +4729,12 @@ float ToanDamage(float damage, const MONSTOR &monster) {
 
 bool PerfectGuard() {
     // Divine Guard: 7th Heaven's guard blocks the heavy hits retail lets through.
-    return ToanWeapon() == ITEM_WEAPON_7THHEAVEN;
+    return ActiveEffect() == ITEM_WEAPON_7THHEAVEN;
 }
 
 bool PassesGuard(int hit_owner, int hit) {
     // Guard Crush: Toan's hits connect even while an enemy blocks.
-    if (hit_owner == CHARA_TOAN && GuardCrush(ToanWeapon())) {
+    if ((hit_owner == CHARA_TOAN || hit_owner == CHARA_XIAO) && GuardCrush(EffectOf(hit_owner))) {
         return true;
     }
 
@@ -3897,7 +4757,7 @@ bool PassesGuard(int hit_owner, int hit) {
 
 bool PassesInvincibility(const MONSTOR &monster) {
     // No Fool's Gold: a mimic waking from its box can be hit; its guard motion still blocks.
-    return NoFoolsGold(ToanWeapon()) && (monster.kind == MONSTER_KIND_MIMIC_SMALL || monster.kind == MONSTER_KIND_MIMIC_LARGE);
+    return NoFoolsGold(ActiveEffect()) && (monster.kind == MONSTER_KIND_MIMIC_SMALL || monster.kind == MONSTER_KIND_MIMIC_LARGE);
 }
 
 int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon) {
@@ -3905,20 +4765,27 @@ int KillAbs(int exp, const MONSTOR &monster, const WEAPON_HAVE *weapon) {
         return exp;
     }
 
+    // The Pocklekul's pockle gives nothing for its fall.
+    if (IsPockle(monster)) {
+        return 0;
+    }
+
+    const int item = EffectItem(weapon);
+
     // Javelin: a sea enemy gives twice its ABS.
-    if (weapon->item_no == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
+    if (item == ITEM_WEAPON_JAVELIN && monster.attachment_kind == MONSTER_FAMILY_SEA) {
         exp *= 2;
     }
 
     // Jacket Hunter: a Master Jacket the Gladius kills gives four times its ABS.
     constexpr s16 kMasterJacketName = 1;
 
-    if (weapon->item_no == ITEM_WEAPON_GLADIUS && monster.name_no == kMasterJacketName) {
+    if (item == ITEM_WEAPON_GLADIUS && monster.name_no == kMasterJacketName) {
         exp *= 4;
     }
 
     // Sanctifier: an undead kill gives twice its ABS.
-    if (Sanctifier(weapon->item_no) && monster.attachment_kind == MONSTER_FAMILY_UNDEAD) {
+    if (Sanctifier(item) && monster.attachment_kind == MONSTER_FAMILY_UNDEAD) {
         exp *= 2;
     }
 
@@ -4045,15 +4912,17 @@ int LevelUpCarry(WEAPON_HAVE *weapon) {
     return std::max(0, weapon->experience - GetWeaponMaxExp(weapon));
 }
 
-void OnKill(const MONSTOR & /*monster*/, WEAPON_HAVE *weapon, float *position) {
-    if (weapon == nullptr) {
+void OnKill(const MONSTOR &monster, WEAPON_HAVE *weapon, float *position) {
+    if (weapon == nullptr || IsPockle(monster)) {
         return;
     }
+
+    const int item = EffectItem(weapon);
 
     // DeSanga: every kill heals it 5 WHP.
     constexpr float kDeSangaHeal = 5.0f;
 
-    if (weapon->item_no == ITEM_WEAPON_DE_SANGA) {
+    if (item == ITEM_WEAPON_DE_SANGA) {
         weapon->durability_f = std::min(static_cast<float>(weapon->durability), weapon->durability_f + kDeSangaHeal);
     }
 
@@ -4062,13 +4931,13 @@ void OnKill(const MONSTOR & /*monster*/, WEAPON_HAVE *weapon, float *position) {
     }
 
     // Shooting Stars: one kill in fifty drops an empty SynthSphere.
-    if (weapon->item_no == ITEM_WEAPON_STAR_BREAKER && std::rand() % 50 == 0) {
+    if (item == ITEM_WEAPON_STAR_BREAKER && std::rand() % 50 == 0) {
         RandomItem->Set(position, 1, -1, ITEM_ATTACH_SYNTHESIS_SPHERE);
         ShowDungeonMessage("The Star Breaker sent\nyou a shooting star!", 3 * kStepsPerSecond);
     }
 
     // Solar Harvest: one kill in a hundred drops a Sun attachment.
-    if (SolarHarvest(weapon->item_no) && std::rand() % 100 == 0) {
+    if (SolarHarvest(item) && std::rand() % 100 == 0) {
         RandomItem->Set(position, 1, -1, ITEM_ATTACH_SUN);
     }
 }
@@ -4077,7 +4946,7 @@ int ChestItem(int item_no) {
     // Fine Fare: water is Premium Water and food Premium Chicken; the Dusack also turns a
     // Treasure Key into Gold Bullion, and the 7 Branch Sword's line gives a Repair Powder one
     // chance in four of being Auto Repair Powder.
-    const int tier = FineFareTier(ToanWeapon());
+    const int tier = FineFareTier(ActiveEffect());
 
     if (tier >= 1) {
         if (item_no == ITEM_REGULAR_WATER || item_no == ITEM_TASTY_WATER) {
@@ -4185,7 +5054,7 @@ void ConfuseRoll(MONSTOR &monster, int owner, int hit_flags) {
     }
 
     // A Babel's Spear from before the port carries no flag of its own until the menus tag it.
-    if ((hit_flags & kConfuseFlag) == 0 && HeldBy(owner) != ITEM_WEAPON_BABEL_S_SPEAR) {
+    if ((hit_flags & kConfuseFlag) == 0 && EffectOf(owner) != ITEM_WEAPON_BABEL_S_SPEAR) {
         return;
     }
 
@@ -4201,6 +5070,12 @@ void ConfuseRoll(MONSTOR &monster, int owner, int hit_flags) {
 bool MonsterTarget(int monster_no, float *target) {
     if (NowMonstorUnit == nullptr || monster_no < 0 || monster_no >= 16) {
         return false;
+    }
+
+    // The Pocklekul's pockle goes for the party's enemy, or walks beside its summoner.
+    if (IsPocklePos(monster_no) && PockleUp()) {
+        PockleAim(target);
+        return true;
     }
 
     // The Mirage's decoy outranks confusion, as in Expanded.
@@ -4253,12 +5128,22 @@ void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
     g_friendly_next = (g_friendly_next + 1) % static_cast<int>(g_friendly.size());
 }
 
+bool SparesPlayer(int monster_no) {
+    return IsPocklePos(monster_no) && PockleUp();
+}
+
 int MonsterHitFor(int victim, int hit, const float *position, float radius) {
     while (hit != -1) {
         const FriendlyHit *friendly = FindFriendly(hit);
 
         if (friendly == nullptr) {
-            return hit;
+            // The party's own hits pass through the pockle.
+            if (!IsPocklePos(victim)) {
+                return hit;
+            }
+
+            hit = NextMonsterHit(hit + 1, position, radius);
+            continue;
         }
 
         const int attacker = friendly->attacker;
@@ -4429,8 +5314,8 @@ void StolenShotDraw() {
 }
 
 bool XiaoAimStep(bool holding) {
-    const int  held = HeldBy(CHARA_XIAO);
-    const bool charges = held == ITEM_WEAPON_MATADOR || held == ITEM_WEAPON_DRAGON_S_Y;
+    const int  held = EffectOf(CHARA_XIAO);
+    const bool charges = held == ITEM_WEAPON_MATADOR || held == ITEM_WEAPON_DRAGON_S_Y || held == ITEM_WEAPON_DIVINEBEASTTITLE;
     bool       full = false;
 
     if (holding && charges) {
@@ -4460,11 +5345,16 @@ bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage)
         return true;
     }
 
-    const int  held = HeldBy(CHARA_XIAO);
+    const int  held = EffectOf(CHARA_XIAO);
     const bool charged = g_charge_armed > 0;
     g_charge_armed = 0;
 
     const int strong = static_cast<int>(static_cast<float>(damage) * kChargedDamage);
+
+    // Spirit Beast: a charged shot leaves the slingshot as Xiao's cat form.
+    if (charged && held == ITEM_WEAPON_DIVINEBEASTTITLE && CatLaunch(world, vector, strong)) {
+        return true;
+    }
 
     // Dragon's Breath: a charged shot is the element's Gemron ball, or where no monster on the
     // floor fires one, the pellet grown five times; either at 1.5 times the damage.
@@ -4517,6 +5407,12 @@ bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage)
 void OnPelletSpawned(int slot) {
     if (slot >= 0 && slot < 12) {
         g_pellets[slot] = {};
+
+        // Super Steve with a Baselard or Claymore sphere: every pellet throws its enemy as the
+        // sword's hits do.
+        if (HeavyHand(EffectOf(CHARA_XIAO))) {
+            g_pellets[slot].kick_back = kSphereKickBack;
+        }
     }
 }
 
@@ -4572,7 +5468,7 @@ void OnPelletHit(CSHOT *shots, int slot, bool monster) {
 
     // Ricochet: the Hardshooter's pellets, and Double Impact's, send a second pellet on from
     // the monster they hit at the nearest other one within reach, or anywhere when none is.
-    const int held = HeldBy(CHARA_XIAO);
+    const int held = EffectOf(CHARA_XIAO);
 
     if (!monster || pellet.bounced || NowMonstorUnit == nullptr ||
         (held != ITEM_WEAPON_HARDSHOOTER && held != ITEM_WEAPON_DOUBLE_IMPACT)) {
@@ -4722,9 +5618,10 @@ int SkeletonKey(const int *usable) {
     }
 
     const int chara = UserStatus->cur_chara;
-    const int held = HeldBy(chara);
+    const int held = EffectOf(chara);
 
-    if (!(chara == CHARA_TOAN && held == ITEM_WEAPON_BONE_RAPIER) && !(chara == CHARA_XIAO && held == ITEM_WEAPON_BONE_SLINGSHOT)) {
+    if (!(chara == CHARA_TOAN && held == ITEM_WEAPON_BONE_RAPIER) &&
+        !(chara == CHARA_XIAO && (held == ITEM_WEAPON_BONE_SLINGSHOT || held == ITEM_WEAPON_BONE_RAPIER))) {
         return -1;
     }
 
@@ -5145,7 +6042,7 @@ void OnAttachmentAdded(int slot) {
  * Guardian Grace: Xiao guarding with the Angel Shooter or the Angel Gear, its Heal live.
  */
 bool GuardianGrace() {
-    const int held = HeldBy(CHARA_XIAO);
+    const int held = EffectOf(CHARA_XIAO);
 
     return (held == ITEM_WEAPON_ANGEL_SHOOTER || held == ITEM_WEAPON_ANGE_GEAR) && BtActStatus.guard_mode == kGuarding &&
            (NowWeaponHave->flags & 0x800) != 0;
@@ -5173,7 +6070,8 @@ void OnHealTick() {
 }
 
 void DrainWhp(int item_no, float base_whp) {
-    if (NowWeaponHave == nullptr || NowWeaponHave->item_no != item_no || base_whp <= 0.0f) {
+    if (NowWeaponHave == nullptr || base_whp <= 0.0f ||
+        (NowWeaponHave->item_no != item_no && (UserStatus == nullptr || EffectOf(UserStatus->cur_chara) != item_no))) {
         return;
     }
 
@@ -5196,6 +6094,11 @@ float ShotRadiusScale(const CSHOT_EFFECT *effect, int slot) {
 }
 
 void OnMonstersLoading() {
+    // A pockle's kind loading mid-floor keeps what the floor has going.
+    if (g_quiet_load) {
+        return;
+    }
+
     ConfuseReset();
     g_stolen.Drop();
     g_breath.Drop();
@@ -5296,6 +6199,7 @@ void OnFloorStart() {
     g_carried_map = false;
     g_carried_crystal = false;
     g_curse.drain_steps = 0;
+    g_curse_xiao.drain_steps = 0;
     g_owl_nearest = -1;
     g_owl_out_of_range = true;
     g_knife_was_in_spring = false;
@@ -5326,6 +6230,8 @@ void OnFloorStart() {
     g_whp_bill = 0.0f;
     g_whp_item = -1;
     ConfuseReset();
+    PockleReset();
+    CatReset();
     FloorClearReset();
     MirageReset();
     ColumnsReset();
@@ -5348,12 +6254,13 @@ void DecoyDraw(const float *scene_ambient) {
 void ColumnDraw() {
     ColumnsDraw();
     ShieldDraw();
+    CatDraw(); // Dark Cloud Expanded: the Divine Beast Title's cat.
 }
 
 void OnHealCycle() {
     // Angel Gear: each turn of the Heal ability's clock mends the whole party by 1 HP, the
     // knocked out excepted, Xiao herself only when the weapon's own Heal is not live.
-    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || HeldBy(CHARA_XIAO) != ITEM_WEAPON_ANGE_GEAR ||
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || EffectOf(CHARA_XIAO) != ITEM_WEAPON_ANGE_GEAR ||
         NowWeaponHave == nullptr) {
         return;
     }

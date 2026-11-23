@@ -20,6 +20,7 @@
 #include "shot_effect.hpp"
 #include "snd.hpp"
 #include "texture.hpp"
+#include "expanded_weapons.hpp"
 
 namespace dc::game {
 
@@ -270,8 +271,9 @@ void CMainItemModel::Step() {
                 int gem_damage = static_cast<int>(30.0f * static_cast<float>(selectMapNo + 1));
 
                 // Dark Cloud Expanded: the Crysknife's "Crystal Affinity". A gem thrown while
-                // Toan holds it bursts for twice the damage.
-                if (NowWeaponHave != nullptr && NowWeaponHave->item_no == ITEM_WEAPON_CRYSKNIFE) {
+                // Toan holds it (or Xiao, with its sphere on Super Steve) bursts for twice the damage.
+                if (NowWeaponHave != nullptr && (NowWeaponHave->item_no == ITEM_WEAPON_CRYSKNIFE ||
+                                                 expanded::SphereWeapon(NowWeaponHave) == ITEM_WEAPON_CRYSKNIFE)) {
                     gem_damage *= 2;
                 }
 

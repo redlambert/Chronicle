@@ -150,6 +150,18 @@ short *MenuDescription(const ClsMes *mes, const short *buff, int line);
 int HeldBy(int chara);
 
 /**
+ * Super Steve's "Sphere Inheritance": the weapon a SynthSphere attached to this weapon was made
+ * from, when the weapon is Super Steve; else -1.
+ */
+int SphereWeapon(const WEAPON_HAVE *weapon);
+
+/**
+ * The weapon whose effect chara carries while out: the held one, or for Xiao holding Super Steve,
+ * the weapon its SynthSphere came from. -1 when chara is not out.
+ */
+int EffectOf(int chara);
+
+/**
  * Partisan: Ungaga's three combo swings play a third faster. Called each step of his swings.
  */
 void UngagaSwingStep();
@@ -210,6 +222,12 @@ void OnMonsterAttack(int attacker, const float *at, float radius, int damage);
  * past the confused enemies' blows it may not take. -1 for none.
  */
 int MonsterHitFor(int victim, int hit, const float *position, float radius);
+
+/**
+ * Dark Cloud Expanded: whether this monster's blows leave the party alone (the Pocklekul's
+ * pockle, whose blows only the enemies take).
+ */
+bool SparesPlayer(int monster_no);
 
 /**
  * The system message that names weapon ability bit in the status window.
