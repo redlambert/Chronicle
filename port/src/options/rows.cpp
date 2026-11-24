@@ -618,7 +618,9 @@ constexpr Row kGameRows[] = {
                                           "\"Swap Keeps Lock-On\"\nSwitching characters\nkeeps the enemy\nlocked on."),
     OnOffRow<&Config::autosave>("game.autosave", "Autosave", "\"Autosave\"\nSaves on arriving in a\ntown or dungeon floor."),
     OnOffRow<&Config::weapon_beep>("game.weapon_beep", "Weapon Beep",
-                                   "\"Weapon Beep\"\nBeeps while a weapon\nis about to break.")
+                                   "\"Weapon Beep\"\nBeeps while a weapon\nis about to break."),
+    OnOffRow<&Config::harder_enemy_ai>("game.harder_enemy_ai", "Harder Enemy AI",
+                                       "\"Harder Enemy AI\"\nEnemies that can get\nup may revive after\ndeath. Next floor.")
 };
 
 constexpr Row kDisplayRows[] = {

@@ -1,3 +1,4 @@
+#include "expanded_enemies.hpp"
 #include "expanded_weapons.hpp"
 #include "monstorunit.hpp"
 
@@ -2512,6 +2513,8 @@ int CMonstorUnit::SetupBaseModel(int slot, int model_no, int texture_block, CDat
     script_data[slot] = reinterpret_cast<char *>(&alloc->base[static_cast<std::ptrdiff_t>(alloc->used) * 16]);
     alloc->Alloc((((file_size >> 6) + 1) << 6) >> 4);
     memcpy(script_data[slot], read_buffer, file_size);
+    // Dark Cloud Expanded: harder enemy AI's revives, spliced right after the script.
+    expanded::HarderAiScript(description->model_name[0], script_data[slot], file_size, alloc);
     model[slot] = *description;
     int count = 2;
 

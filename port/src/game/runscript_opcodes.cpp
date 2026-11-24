@@ -1,3 +1,4 @@
+#include "expanded_enemies.hpp"
 #include "expanded_weapons.hpp"
 #include "runscript_opcodes.hpp"
 
@@ -124,6 +125,9 @@ int _SET_MOTION(RS_STACKDATA *stack, int argc) {
             speed *= 0.5f;
         }
 
+        // Dark Cloud Expanded: a miniboss's longer strides walk slower.
+        speed = expanded::MinibossMotionSpeed(monster_no, motion_id, speed);
+
         NowMonstorUnit->chara[monster_no][0].SetMotion(motion_id, 0);
         NowMonstorUnit->chara[monster_no][0].SetMotionSpeed(speed);
         NowMonstorUnit->monster[monster_no].requested_motion = motion_id;
@@ -143,6 +147,9 @@ int _SET_MOTION(RS_STACKDATA *stack, int argc) {
             speed *= 0.5f;
         }
 
+        // Dark Cloud Expanded: a miniboss's longer strides walk slower.
+        speed = expanded::MinibossMotionSpeed(monster_no, motion_id, speed);
+
         NowMonstorUnit->chara[monster_no][0].SetMotion(motion_id, 0);
         NowMonstorUnit->chara[monster_no][0].SetMotionSpeed(speed);
         NowMonstorUnit->monster[monster_no].requested_motion = motion_id;
@@ -161,6 +168,9 @@ int _SET_MOTION(RS_STACKDATA *stack, int argc) {
         if (half_speed) {
             speed *= 0.5f;
         }
+
+        // Dark Cloud Expanded: a miniboss's longer strides walk slower.
+        speed = expanded::MinibossMotionSpeed(monster_no, motion_id, speed);
 
         int mode = GetStackInt(stack++);
         NowMonstorUnit->chara[monster_no][0].SetMotion(motion_id, mode);
@@ -242,7 +252,14 @@ int _GET_DISTANCE(RS_STACKDATA *stack, int argc) {
         target_position[2] = GetStackFloat(stack++);
     }
 
-    SetStack(stack, DistVector(monster_position, target_position));
+    float distance = DistVector(monster_position, target_position);
+
+    // Dark Cloud Expanded: a miniboss commits to its attack on the player from further away.
+    if (argc == 1) {
+        distance = expanded::MinibossDistance(monster_no, distance);
+    }
+
+    SetStack(stack, distance);
     return 1;
 }
 
@@ -867,8 +884,10 @@ int _STATUS_SET_LOCKON_TRG(RS_STACKDATA *stack, int argc) {
         std::println("lock:NofFountNull {}", name);
     } else {
         NowMonstorUnit->monster[monster_no].lockon_frame = frame;
-        NowMonstorUnit->monster[monster_no].lockon_scale_x = scale_x;
-        NowMonstorUnit->monster[monster_no].lockon_scale_y = scale_y;
+        // Dark Cloud Expanded: a miniboss's lock-on marker is half again as large.
+        const float marker = expanded::IsMiniboss(monster_no) ? 1.5f : 1.0f;
+        NowMonstorUnit->monster[monster_no].lockon_scale_x = scale_x * marker;
+        NowMonstorUnit->monster[monster_no].lockon_scale_y = scale_y * marker;
     }
 
     return 1;
@@ -924,7 +943,8 @@ int _SET_BODY_COL(RS_STACKDATA *stack, int argc) {
             if (frame != nullptr) {
                 NowMonstorUnit->effect[monster_no].timer[i] = 1;
                 NowMonstorUnit->effect[monster_no].frame[i] = frame;
-                NowMonstorUnit->effect[monster_no].radius[i] = radius;
+                // Dark Cloud Expanded: a miniboss's body spheres grow with its model.
+                NowMonstorUnit->effect[monster_no].radius[i] = expanded::MinibossBodyRadius(monster_no, radius);
                 NowMonstorUnit->effect[monster_no].motion_start[i] = start;
                 NowMonstorUnit->effect[monster_no].motion_end[i] = end;
 
@@ -988,7 +1008,8 @@ int _SET_DMG_COL(RS_STACKDATA *stack, int /*argc*/) {
             if (frame != nullptr) {
                 NowMonstorUnit->effect2[monster_no].active[i] = 1;
                 NowMonstorUnit->effect2[monster_no].frame[i] = frame;
-                NowMonstorUnit->effect2[monster_no].radius[i] = radius;
+                // Dark Cloud Expanded: a miniboss's attack spheres reach further.
+                NowMonstorUnit->effect2[monster_no].radius[i] = expanded::MinibossAttackRadius(monster_no, radius);
                 NowMonstorUnit->effect2[monster_no].motion_start[i] = start;
                 NowMonstorUnit->effect2[monster_no].motion_end[i] = end;
                 NowMonstorUnit->effect2[monster_no].last_slot = i;
@@ -1012,7 +1033,8 @@ int _SET_DMG_PARA(RS_STACKDATA *stack, int argc) {
     int slot = NowMonstorUnit->effect2[monster_no].last_slot;
 
     if (slot != -1) {
-        NowMonstorUnit->effect2[monster_no].damage[slot] = GetStackInt(stack++);
+        // Dark Cloud Expanded: a miniboss hits half again as hard.
+        NowMonstorUnit->effect2[monster_no].damage[slot] = expanded::MinibossMelee(monster_no, GetStackInt(stack++));
         NowMonstorUnit->effect2[monster_no].flags[slot] = GetStackInt(stack++);
         NowMonstorUnit->effect2[monster_no].kind[slot] = GetStackInt(stack++);
         NowMonstorUnit->effect2[monster_no].angle[slot] = 0.0f;
@@ -1056,7 +1078,8 @@ int _SET_SHOT(RS_STACKDATA *stack, int argc) {
     NowMonstorUnit->event[monster_no].damage_override = -1;
 
     if (argc == 5) {
-        NowMonstorUnit->event[monster_no].damage_override = GetStackInt(stack);
+        // Dark Cloud Expanded: a miniboss's projectiles hit half again as hard.
+        NowMonstorUnit->event[monster_no].damage_override = expanded::MinibossShot(monster_no, GetStackInt(stack));
     }
 
     return 1;
@@ -1094,7 +1117,8 @@ int _SET_SHOT2(RS_STACKDATA *stack, int argc) {
     NowMonstorUnit->event2[monster_no].damage_override = -1;
 
     if (argc == 5) {
-        NowMonstorUnit->event2[monster_no].damage_override = GetStackInt(stack);
+        // Dark Cloud Expanded: a miniboss's projectiles hit half again as hard.
+        NowMonstorUnit->event2[monster_no].damage_override = expanded::MinibossShot(monster_no, GetStackInt(stack));
     }
 
     return 1;

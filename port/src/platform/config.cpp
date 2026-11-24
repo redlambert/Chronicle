@@ -434,6 +434,9 @@ bool Apply(Config &config, std::string_view name, const Json &value) {
     if (name == "game.weapon_beep") {
         return ReadBool(value, config.weapon_beep);
     }
+    if (name == "game.harder_enemy_ai") {
+        return ReadBool(value, config.harder_enemy_ai);
+    }
     if (name == "audio.music") {
         return ReadBool(value, config.music);
     }
@@ -756,6 +759,7 @@ std::string ConfigSerialize(const Config &config) {
     root["game"]["swap_keeps_lock_on"] = config.swap_keeps_lock_on;
     root["game"]["autosave"] = config.autosave;
     root["game"]["weapon_beep"] = config.weapon_beep;
+    root["game"]["harder_enemy_ai"] = config.harder_enemy_ai;
     root["game"]["text_wipe"] = config.text_wipe;
     root["game"]["language"] = std::string(kLanguageNames[config.language >= 2 && config.language <= 6 ? config.language : 0]);
     const ConfigGameOptions &options = config.options;

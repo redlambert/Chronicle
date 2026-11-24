@@ -1,4 +1,5 @@
 #include "expanded_weapons.hpp"
+#include "expanded_enemies.hpp"
 
 #include <libvu0.h>
 
@@ -1669,7 +1670,7 @@ BorrowedShot       g_breath(g_breath_frames, sizeof(g_breath_frames));
  * The loaded effect a monster's projectile fires from, or null where it has none that flies.
  */
 CSHOT_EFFECT *Projectile(int entry) {
-    if (NowShotEffect == nullptr || entry < 0 || entry >= 5) {
+    if (NowShotEffect == nullptr || entry < 0 || entry >= kShotEffectSlots) {
         return nullptr;
     }
 
@@ -4124,6 +4125,14 @@ void CatDraw() {
 
 } // namespace
 
+bool IsPockleSlot(int monster_no) {
+    return IsPocklePos(monster_no);
+}
+
+bool QuietModelLoad() {
+    return g_quiet_load;
+}
+
 // ── Who holds what ──────────────────────────────────────────────────────────────────────────
 
 int ToanWeapon() {
@@ -4649,6 +4658,7 @@ void DungeonStep() {
     WiseOwlStep();
     WhpStep();
     ReflectorStep();
+    MinibossStep(); // Dark Cloud Expanded: minibosses' boosted weapon drops.
 
     // Atlamillia Insurance's notice, once the game's own break message has gone.
     if (!g_insured_notice.empty() && DngMessMan.timer <= 0) {
@@ -5897,76 +5907,16 @@ bool PieroItems(int map_no, int floor_no, int *item0, int *item1) {
 }
 
 void OnMonstersPlaced(CMonstorUnit *unit) {
-    // Dark Cloud Enhanced's minibosses: on 30% of floors with more than three regular enemies on
-    // the ground, one of them becomes a champion. It stands 1.5x as large, with 3x the HP, ABS and
-    // money, takes a tenth of the damage of thrown items, and always drops something: 35% the
-    // dungeon's back-floor key, else 15% a weapon from the dungeon's table, else 50% an
-    // attachment (30% of those a gem), else an item (30% of those a better one). One that holds
-    // the floor's key is passed over. Left out: Enhanced's stamina timer change.
-    if (unit == nullptr || UserStatus == nullptr || selectMapNo < 0 || selectMapNo > 6) {
-        return;
+    // Dark Cloud Expanded's minibosses (expanded_enemies.cpp), in place of Enhanced's.
+    MinibossesPlaced(unit);
+}
+
+int RandomDungeonWeapon(int dungeon, int floor) {
+    if (dungeon < 0 || dungeon > 6) {
+        return -1;
     }
 
-    // Flying enemies, Gemrons, mimics and bosses, by name: Enhanced's list of those that
-    // cannot hold a key.
-    static constexpr std::array<s16, 37> kExcluded = {9, 21, 22, 42, 51, 58, 60, 61, 90, 91, 301, 303, 304, 305, 306, 308, 309, 310, 311,
-                                                      312, 313, 314, 315, 316, 317, 318, 319, 84, 112, 113, 114, 115, 116, 117, 119, 120, -1};
-    static constexpr std::array<s16, 7> kBackFloorKeys = {ITEM_TRAM_OIL, ITEM_SUN_DEW, ITEM_FLAPPING_FISH, ITEM_SECRET_PATH_KEY,
-                                                          ITEM_BRAVERY_LAUNCH, ITEM_FLAPPING_DUSTER, ITEM_CRYSTAL_EYEBALL};
-    static constexpr std::array<s16, 12> kGems = {95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106};
-    static constexpr std::array<s16, 19> kAttachments = {81, 82, 83, 84, 85, 91, 92, 93, 94, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120};
-    static constexpr std::array<s16, 3> kGoodItems = {150, 178, 235}; // Stamina Drink, Dran's Feather, Powerup Powder
-    static constexpr std::array<s16, 4> kAmulets = {132, 133, 134, 135};
-
-    auto roll = [](int bound) {
-        return static_cast<int>(static_cast<float>(bound) * static_cast<float>(rand()) / 2147483648.0f);
-    };
-
-    std::vector<int> candidates;
-
-    for (int m = 0; m < 16; m++) {
-        const MONSTOR &monster = unit->monster[m];
-
-        if (monster.state >= 1 && monster.hp > 0 && monster.kind == MONSTER_KIND_NORMAL && monster.drop_item == -1 &&
-            std::ranges::find(kExcluded, monster.name_no) == kExcluded.end()) {
-            candidates.push_back(m);
-        }
-    }
-
-    if (candidates.size() <= 3 || roll(100) > 30) {
-        return;
-    }
-
-    const int m = candidates[roll(static_cast<int>(candidates.size()))];
-    MONSTOR  &boss = unit->monster[m];
-
-    boss.max_hp *= 3;
-    boss.hp = boss.max_hp;
-    boss.exp *= 3;
-    boss.money *= 3;
-    boss.money_chance = 100;
-    boss.item_damage_rate = 10;
-    boss.drops_items = 1;
-
-    for (int i = 0; i <= boss.attachment_count; i++) {
-        CCharacter &part = unit->chara[m][i];
-        part.scale[0] *= 1.5f;
-        part.scale[1] *= 1.5f;
-        part.scale[2] *= 1.5f;
-    }
-
-    const int dungeon = selectMapNo;
-
-    if (roll(100) < 35) {
-        boss.drop_item = kBackFloorKeys[dungeon];
-    } else if (roll(100) < 15) {
-        const auto &table = DungeonWeapons(dungeon, UserStatus->cur_floor);
-        boss.drop_item = table[roll(static_cast<int>(table.size()))];
-    } else if (roll(100) < 50) {
-        boss.drop_item = roll(100) < 30 ? kGems[roll(kGems.size())] : kAttachments[roll(kAttachments.size())];
-    } else {
-        boss.drop_item = roll(100) < 30 ? kGoodItems[roll(kGoodItems.size())] : kAmulets[roll(kAmulets.size())];
-    }
+    return Pick(DungeonWeapons(dungeon, floor));
 }
 
 void OnFloorEvents(CDungeonMap *map, int floor_no, int main_floor) {

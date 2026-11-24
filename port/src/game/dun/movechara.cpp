@@ -1561,7 +1561,7 @@ void DunMoveChara() {
             if (EdFadeOutCheck() != 0) {
                 CSHOT_EFFECT *effects = NowShotEffect->effect;
 
-                for (int i = 0; i < 5; i++) {
+                for (int i = 0; i < kShotEffectSlots; i++) {
                     effects[i].Initialize();
                 }
 
@@ -1610,7 +1610,7 @@ void DunMoveChara() {
                 TexManager.CleanUpTextureList();
                 CSHOT_EFFECT *effects = NowShotEffect->effect;
 
-                for (int i = 0; i < 5; i++) {
+                for (int i = 0; i < kShotEffectSlots; i++) {
                     effects[i].Initialize();
                 }
 

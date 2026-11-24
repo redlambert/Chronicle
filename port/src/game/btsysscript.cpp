@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include "expanded_enemies.hpp"
 #include "btactstatus.hpp"
 #include "btitem.hpp"
 #include "btmisc.hpp"
@@ -123,6 +124,8 @@ void BtSystemScriptLoad(int floor) {
     wait_now_loading_vsync();
     // Dark Cloud Enhanced: the script file is logged.
     expanded::LogDungeonScript(floor, g_event_data, read_size);
+    // Dark Cloud Expanded: Ungaga's doors open for the whole party.
+    expanded::PatchUngagaDoors(floor, g_event_data, read_size);
     BtSystemScriptFileBuffer.Alloc((read_size >> 4) + 1);
     char *mes = ScriptBufferTail();
     LoadFile(mes_path.data(), mes, &mes_size);

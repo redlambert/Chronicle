@@ -2352,7 +2352,7 @@ void DunMainDraw() {
 
         CSHOT_EFFECT *shot = NowShotEffect->effect;
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < kShotEffectSlots; i++) {
             shot[i].Draw();
         }
 
@@ -3220,7 +3220,7 @@ void motionDrive() {
 
     CSHOT_EFFECT *effects = NowShotEffect->effect;
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < kShotEffectSlots; i++) {
         effects[i].Step();
     }
 
@@ -3326,7 +3326,7 @@ void BtLoadMonstor(int ura) {
 
     CSHOT_EFFECT *effects = NowShotEffect->effect;
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < kShotEffectSlots; i++) {
         effects[i].Initialize();
     }
 

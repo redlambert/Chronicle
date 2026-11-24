@@ -9,11 +9,18 @@
 namespace dc::game {
 
 /**
+ * Projectile effects a floor can hold. Retail held five and refused a floor's sixth; Dark Cloud
+ * Expanded shares the five among every effect the floor needs. Here the pack simply holds one for
+ * each shot of the nine kinds of monster a floor loads.
+ */
+constexpr int kShotEffectSlots = 18;
+
+/**
  * Holds the projectile effects the dungeon can run, and which one is being set up.
  */
 class CSHOT_EFFECT_PACK {
 public:
-    CSHOT_EFFECT effect[5]; /**< The effects the dungeon can run. */
+    CSHOT_EFFECT effect[kShotEffectSlots]; /**< The effects the dungeon can run. */
 
     s32 current_effect; /**< Effect that SetUserID2 and SetDmg apply to. */
 
@@ -42,6 +49,6 @@ public:
     void SetDmg(int damage);
 };
 
-STATIC_ASSERT(sizeof(CSHOT_EFFECT_PACK) == 0x326F0);
+STATIC_ASSERT(sizeof(CSHOT_EFFECT_PACK) == kShotEffectSlots * sizeof(CSHOT_EFFECT) + 0x10);
 
 } // namespace dc::game

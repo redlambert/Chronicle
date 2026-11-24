@@ -435,9 +435,24 @@ void OnWeaponBroke(const WEAPON_HAVE &weapon);
 
 /**
  * Every monster of a new floor has been placed and the floor's key handed out: Dark Cloud
- * Enhanced's miniboss roll.
+ * Expanded's miniboss roll.
  */
 void OnMonstersPlaced(CMonstorUnit *unit);
+
+/**
+ * A weapon from Enhanced's table of the dungeon, for its floor, or -1.
+ */
+int RandomDungeonWeapon(int dungeon, int floor);
+
+/**
+ * Whether the monster in this slot is the Pocklekul's pockle.
+ */
+bool IsPockleSlot(int monster_no);
+
+/**
+ * Whether a pockle's kind is loading mid-floor.
+ */
+bool QuietModelLoad();
 
 /**
  * Enhanced's clown: picks the two boxes' items for a floor of a dungeon. Returns false to leave

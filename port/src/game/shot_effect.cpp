@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <print>
 #include <string>
 
 #include "collisiondata.hpp"
@@ -554,18 +555,19 @@ void CSHOT_EFFECT::Initialize() {
 }
 
 int CSHOT_EFFECT_PACK::Entry(BT_SHOT_EFFECT *description, unsigned int *resource, int texture_block, CDataAlloc2<1> *allocator, int slots) {
-    for (int index = 0; index < 5; index++) {
+    for (int index = 0; index < kShotEffectSlots; index++) {
         if (effect[index].effect_data == description) {
             return index;
         }
     }
 
-    for (int index = 0; index < 5; index++) {
+    for (int index = 0; index < kShotEffectSlots; index++) {
         if (effect[index].Entry(description, resource, texture_block, allocator, slots) != 0) {
             return index;
         }
     }
 
+    std::println("[SharedShots] every one of the {} shot slots is taken", kShotEffectSlots);
     return -1;
 }
 
