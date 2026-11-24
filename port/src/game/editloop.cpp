@@ -1880,7 +1880,8 @@ int EditLoop() {
         sceVu0CopyVector(focus_pos, ECursorFrame->position);
     }
 
-    if ((EdDebugMoveFlag > 0 || MapNo < TOWN_COUNT) && EdPadDown(0x100, 2) != 0 && EdCheckViewMode() == 0 && change_time_event == 0) {
+    // Dark Cloud Expanded: the overhead camera opens on every town map, not just the five Georama towns.
+    if (EdPadDown(0x100, 2) != 0 && EdCheckViewMode() == 0 && change_time_event == 0) {
         sceVu0FVECTOR at;
 
         if (GameMode == ED_MODE_WALK) {
@@ -1967,7 +1968,11 @@ int EditLoop() {
     if (GameMode == ED_MODE_GEORAMA) {
         EdStopSoundSrc();
 
-        if ((EdPadDown(0x10, 2) != 0 || EdPadDown(0x20, 2) != 0) && EdInitMenu(ED_MENU_EDIT) != 0) {
+        // Dark Cloud Expanded: outside the five Georama towns the overhead camera is only a camera; the
+        // Georama menu has no town to build there.
+        const bool georama_town = MapNo < TOWN_COUNT || EdDebugMoveFlag > 0;
+
+        if (georama_town && (EdPadDown(0x10, 2) != 0 || EdPadDown(0x20, 2) != 0) && EdInitMenu(ED_MENU_EDIT) != 0) {
             NowSelectParts = -1;
             GameMode = ED_MODE_GEORAMA_MENU_INIT;
             SndSePlay(MENU_SOUND_CONFIRM, -1, 0);

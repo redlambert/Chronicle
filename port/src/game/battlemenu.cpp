@@ -1246,6 +1246,16 @@ int BattleMenuCharaKey() {
         case MENU_CHARA_CHANGE_LOAD:
             MenuChara.change_counter++;
 
+            // Dark Cloud Expanded: a town pick plays the dungeon's switch sequence, with no leader to
+            // load; the ally takes over once the menu has closed.
+            if (BtlMenuMode == BATTLE_MENU_MODE_TOWN) {
+                if (MenuChara.change_counter > 20) {
+                    MenuChara.state = MENU_CHARA_CHANGE_EXIT;
+                }
+
+                break;
+            }
+
             if (ReadBGSync() == 0 && MenuChara.change_counter > 20) {
                 BtMenuLoadChara();
                 BreakReadBG();
@@ -1257,6 +1267,11 @@ int BattleMenuCharaKey() {
             break;
         case MENU_CHARA_CHANGE_EXIT:
             MenuChara.change_counter++;
+
+            if (BtlMenuMode == BATTLE_MENU_MODE_TOWN) {
+                ExitBattleMenu(1);
+                return 0;
+            }
 
             if (ReadBGSync() == 0 && MenuChara.change_counter > 20) {
                 BtMenuLoad2(1);
@@ -1466,7 +1481,7 @@ int BattleMenuCharaKey() {
                     case BATTLE_MENU_MODE_TOWN: {
                         // Dark Cloud Enhanced: any ally in the party can walk the town in Toan's
                         // place; they take over once the menu is left.
-                        bool picked = false;
+                        int picked = -1;
 
                         for (int i = 0; i < MenuChara.slot_count; i++) {
                             if (SysChara[i].place != 0) {
@@ -1477,16 +1492,25 @@ int BattleMenuCharaKey() {
 
                             if (chara < BtlMenuStatusPt->party_size) {
                                 expanded::TownAllySelect(chara);
-                                picked = true;
+                                picked = chara;
                             }
                         }
 
-                        if (!picked) {
+                        if (picked < 0) {
                             ComMenuSePlay(MENU_SOUND_REFUSE);
                             break;
                         }
 
                         ComMenuSePlay(MENU_SOUND_CONFIRM);
+
+                        // Dark Cloud Expanded: a new character plays the dungeon's switch sequence, the
+                        // portraits spreading off and the menu closing itself.
+                        if (picked != expanded::TownAlly()) {
+                            MenuChara.state = MENU_CHARA_CHANGE_LOAD;
+                            MenuChara.change_counter = 0;
+                            return 1;
+                        }
+
                         BattleMenuFlag = BTLMENU_STATE_CHARA_CLOSE;
                         MenuChara.state = MENU_CHARA_CLOSE;
                         MenuChara.timer = 0.0f;

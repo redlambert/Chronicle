@@ -407,9 +407,10 @@ void Promote(CMonstorUnit *unit, int m, int dungeon) {
     boss.money_chance = kLootChance;
     boss.drops_items = 1;
 
-    // Expanded writes the resistance as a word, which also clears the status chance beside it.
+    // Expanded writes the resistance as a word, which also clears the status chance beside it, so
+    // its minibosses shrug off every status hit. That side effect is left out here: a miniboss takes
+    // status hits as its species does.
     boss.item_damage_rate = kItemResist;
-    boss.status_chance = 0;
 
     LootFor(unit, m, dungeon);
     g_minibosses.push_back({.slot = m, .name_no = boss.name_no, .alive = true});

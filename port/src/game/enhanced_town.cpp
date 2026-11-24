@@ -95,6 +95,11 @@ constexpr int kRuby = 3;
 int g_ally = 0;
 int g_pending = -1;
 
+// Dark Cloud Expanded: an ally who goes fishing comes back once the session is over. The fishing
+// event loads Toan's fishing model and its quit script loads Toan, so the ally is put back after.
+int  g_fishing_ally = -1;
+bool g_saw_fishing = false;
+
 // Which of its two lines each villager says next, by its place in kAllyTalk.
 std::set<int> g_second_line;
 
@@ -159,11 +164,29 @@ void TownAllySelect(int chara) {
 void TownAllyMapLoaded() {
     g_ally = 0;
     g_pending = -1;
+    g_fishing_ally = -1;
+    g_saw_fishing = false;
     g_second_line.clear();
 }
 
 void TownAllyStep() {
     LogTownEventStep();
+
+    // Dark Cloud Expanded: allies can fish. An event that turned out to be fishing gives the ally
+    // back once walking resumes; any other event leaves Toan, as before.
+    if (g_fishing_ally > 0) {
+        if (GameMode == ED_MODE_FISHING) {
+            g_saw_fishing = true;
+        } else if (GameMode == ED_MODE_WALK) {
+            if (g_saw_fishing && g_pending < 0) {
+                g_pending = g_fishing_ally;
+                LogLine("town.txt", std::format("map {}: fishing over, character {} comes back", MapNo, g_fishing_ally));
+            }
+
+            g_fishing_ally = -1;
+            g_saw_fishing = false;
+        }
+    }
 
     if (g_pending < 0 || GameMode != ED_MODE_WALK) {
         return;
@@ -178,6 +201,8 @@ void TownAllyStep() {
 void TownAllyEventStarted() {
     g_pending = -1;
     if (g_ally != 0 && GameMode == ED_MODE_EVENT) {
+        g_fishing_ally = g_ally;
+        g_saw_fishing = false;
         LoadTownChara(0);
     }
 }

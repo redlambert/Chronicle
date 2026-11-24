@@ -1419,14 +1419,13 @@ void EdMoveChara() {
         lx = ly = 0.0f;
     }
 
-    if (PadOn(0x80) != 0 && EdDebugMoveFlag > 0) {
-        if (EdDebugMoveFlag > 0) {
-            lx *= 2.0f;
-            ly *= 2.0f;
-        } else {
-            lx *= 1.5f;
-            ly *= 1.5f;
-        }
+    // Dark Cloud Expanded: the developers' fast run, twice the speed while the button is held, in every
+    // town (Expanded leaves their move flag on for its overhead camera), but never while fishing.
+    const bool fast_run = EdDebugMoveFlag > 0 || EdMoveCharaInfo.fishing == 0;
+
+    if (PadOn(0x80) != 0 && fast_run) {
+        lx *= 2.0f;
+        ly *= 2.0f;
     }
 
     int   motion = 0;

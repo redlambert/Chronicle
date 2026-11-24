@@ -1,6 +1,6 @@
 # Dark Cloud Expanded → Chronicle port checklist
 
-Expanded adds up to 172 features. 92 are done, 40 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 13 are to do.
+Expanded adds up to 172 features. 94 are done, 41 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 10 are to do.
 
 ## Order of work
 
@@ -14,7 +14,7 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 6. Expanded zip 1, weapons: built in chronicle-expanded-weapons-1.zip (Babel's Spear, Terra Sword, Cactus Desert Bloom, Angel Gear party heal and Guardian Reflector, Chronicle 2, their menu descriptions). Zip 1b built in chronicle-expanded-weapons-1b.zip (Pockle Call, Spirit Beast, Super Steve's Sphere Inheritance, the last menu descriptions)
 7. Expanded zip 2, dungeons and enemies: miniboss scaling and loot tables, more than five shot types per floor, Ungaga's doors for the whole party, harder enemy AI option (all in, untested)
 8. Expanded zip 3, fishing and quests: casting and line fixes, bobber camera, fish steering, size changes, Mardan rework and records, Pike/Pao/Sam/Devia tracking, Mint's 17-fish quest, quest tracker, Hello starts quests, Fairy King fix (all in, untested)
-9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run
+9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run (switch sequence, fishing and overhead camera in, untested; animation sets and ladder climbs still to do)
 10. Last, if at all (lowest priority): the map changes. New fishing spots, Queens canal tide, Yellow Drops west bank, Queens snake statue, Brownboo cleanup, Brownboo pond rocks, town camera collision
 
 ## How to read this
@@ -86,7 +86,7 @@ None of these are started; the chest randomizer and minibosses are the biggest.
 | Leave the dungeon from the floor select screen | Enhanced | Done | Untested. Circle on the floor select closes it and starts the game's own escape to town (the Escape Powder's). It costs nothing |
 | Floor cleared message | Enhanced | Done, partial | Untested. "There is no sign of monsters on this floor" once the last one dies, once per floor. Expanded's line also mentions an escape skill; left out since Chronicle has none |
 | Minibosses: a stronger enemy on floor entry | Enhanced | Done, partial | Untested. Replaced in zip 2 by Expanded's minibosses (the two rows below): the roll, size, stats and loot are now Expanded's. Left out: Enhanced's stamina timer change |
-| Miniboss combat scaling (hitbox, shots, aggro range) | Expanded | Done, partial | Untested. Each eligible enemy (not a boss, the key holder or the pockle; mimics and flyers count) has a 1 in (15 minus ineligible) chance, every winner promoted. 1.5x model and body spheres, 1.6x attack spheres, 1.5x lock-on cursor, 3x HP, ABS and money, 1.5x defense, melee and own-damage shots, 1/10 item damage, walk clip slowed 1.3x (not the bats). Engages from 1.3x as far (1.5x plants and chariot). Back-floor trips keep the surviving minibosses on each side, and a respawned key moves off them. Works differently: reach is per enemy (Expanded shares it per species via the nearest one) and only scales distance-to-player reads. As in Expanded's word write, minibosses' status chance is 0, so they shrug off status hits |
+| Miniboss combat scaling (hitbox, shots, aggro range) | Expanded | Done, partial | Untested. Each eligible enemy (not a boss, the key holder or the pockle; mimics and flyers count) has a 1 in (15 minus ineligible) chance, every winner promoted. 1.5x model and body spheres, 1.6x attack spheres, 1.5x lock-on cursor, 3x HP, ABS and money, 1.5x defense, melee and own-damage shots, 1/10 item damage, walk clip slowed 1.3x (not the bats). Engages from 1.3x as far (1.5x plants and chariot). Back-floor trips keep the surviving minibosses on each side, and a respawned key moves off them. Works differently: reach is per enemy (Expanded shares it per species via the nearest one) and only scales distance-to-player reads. Minibosses take status hits as their species does (Expanded's minibosses shrug them off, a side effect of how it writes their stats) |
 | Miniboss loot tables and boosted weapon drops | Expanded | Done, partial | Untested. Per-dungeon species loot: 5% rare drop, else 30% flavour drop, else 35% back-floor key, 15% weapon, 80% attachment (60% gem), else item (60% Powerup or Auto Repair Powder). Boosted rare/flavour weapons (Gladius, Bandit Slingshot, Frozen Tuna, Super Steve, Dark Cloud...) get their stats, elements and abilities once picked up after the kill; cancelled on floor change. Works differently: the weapon roll uses Enhanced's dungeon weapon table, and the boost watches every character's bag (Expanded only Toan's) |
 | More than five monster shot types per floor | Expanded | Done, partial | Untested. Works differently: the shot pack simply holds 18 effects (two for each of 9 monster kinds) instead of Expanded's swapping of five slots. Console logs "[SharedShots]" if all 18 fill |
 | Ungaga's doors passable for the whole party | Code only | Done | Untested. Sun and Moon Temple, Moon Sea and Gallery of Time event scripts get Expanded's door values (both 150 trigger distances to 50, three bytes to 30) at load, found at Expanded's offsets or by pattern. Console logs "[UngagaDoors]" either way |
@@ -218,19 +218,19 @@ Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, 
 
 ## Towns, allies and camera
 
-All to do; playing as allies in town is the big one, and most rows here depend on it.
+Playing as allies in town is in; the allies' animation sets and ladder climbs are the big pieces left, with the map work.
 
 | Feature | From | Status | Notes |
 | --- | --- | --- | --- |
 | Play as any ally in town, swapped in place | Both | Done, partial | Untested. Town party menu: pick any ally in the party and they take over once you leave the menu (pick Toan to switch back). Uses Enhanced's models (the allies' cutscene models) and its Xiao and Ruby motion fixes; Xiao's first-person camera sits lower. Toan comes back for every cutscene and on every new map. Event points are off for allies in maps 11, 13, 14, 33, 35 and 37, as in Enhanced. Left out: Xiao's lower talk camera, the stuck-landing fix |
-| Party menu commit plays the dungeon's switch sequence | Expanded | To do | Needs the ally row |
+| Party menu commit plays the dungeon's switch sequence | Expanded | Done | Untested. Picking a different character in the town party menu: the confirm chime, the portraits spread off-screen, the menu closes itself and the ally takes over. Picking the one already walking closes the page as before; an ally not in the party yet gets the reject beep |
 | Full town animation sets for all five allies | Expanded | To do | Hard; needs the ally row |
 | Each ally climbs ladders their own way | Expanded | To do | Hard; needs the ally row |
-| Allies can fish | Expanded | To do | Needs the ally row |
+| Allies can fish | Expanded | Done | Untested. The fishing session runs as Toan (it loads Toan's fishing model, as in Expanded), and the ally comes back once you're walking again. town.txt in logs/ notes each return |
 | Town camera collision overhaul | Expanded | To do | Hard |
 | Queens snake statue is climbable | Expanded | To do |  |
 | Brownboo cleanup: edit view, see-through houses | Expanded | To do |  |
-| Overhead Georama camera and fast run in every town | Expanded | To do |  |
+| Overhead Georama camera and fast run in every town | Expanded | Done, partial | Untested. Select opens the overhead camera on every town map. Holding Square doubles your walking speed anywhere in town, except while fishing. Leaving the overhead camera still snaps you to the ground. Works differently: outside the five Georama towns the overhead camera can't open the Georama menu, since there's nothing to build there. Left out: the developers' debug jump, which Expanded switches on by accident with the fast run |
 | Clock and time in Yellow Drops and Dark Heaven Castle | Enhanced | Done | Untested. Yellow Drops (map 23) and Dark Heaven Castle (38, 40) skip their map script's time stop, so the clock shows and time runs there as in other towns |
 | Town music starts earlier in the day | Enhanced | Done | Untested. Music comes back at 9:00 instead of 11:00 (Enhanced pnach, EdSetBgmVol) |
 | Demon Shaft unlock check | Code only | Done | Untested. The world map hides Demon Shaft until the game is cleared (the save's clear flag) |
