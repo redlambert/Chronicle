@@ -2,6 +2,7 @@
 
 #include <libvu0.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstring>
@@ -13,8 +14,10 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <vector>
 
 #include "character.hpp"
+#include "data/data_read.hpp"
 #include "dataread.hpp"
 #include "dun/gameloop.hpp"
 #include "editloop.hpp"
@@ -74,6 +77,68 @@ void SavePackConfigs(const std::string &stem, u_int *pack) {
         const std::string name = names[i] != nullptr ? names[i] : std::format("{}.cfg", i);
         SaveOnce(std::format("{}_{}", stem, name), files[i], sizes[i]);
     }
+}
+
+// Dark Cloud Expanded's ally town movesets and ladder climbs are clips taken from these models
+// (IsoPatch/TownModelBakes.cs). Each is copied once into logs/models/, its folders kept, so the
+// clips and skeletons can be read before the movesets are ported.
+void DumpTownModels() {
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    done = true;
+
+    constexpr std::array<const char *, 18> kModels = {
+        "chara/c01d.chr",
+        "gedit/e01/chara/c04pcat.chr",
+        "gedit/e01/chara/e04c04cat.chr",
+        "gedit/s86/chara/c04cat.chr",
+        "dun/d01/event/e613c04cat.chr",
+        "gedit/s01/chara/c06p.chr",
+        "gedit/s01/chara/e101.chr",
+        "gedit/s01/chara/e102.chr",
+        "dun/mainchara/c06b.chr",
+        "gedit/e03/chara/c05a.chr",
+        "gedit/e03/chara/e223c05a.chr",
+        "gedit/e03/chara/e228c05a.chr",
+        "dun/mainchara/c05a.chr",
+        "gedit/e04/chara/e323_2c10a.chr",
+        "dun/mainchara/c10b.chr",
+        "gedit/e05/chara/c18p.chr",
+        "gedit/e05/chara/e403c18a.chr",
+        "gedit/s13/chara/e402c18a.chr",
+    };
+    constexpr std::uintmax_t kSector = 2048;
+
+    const fs::path root = LogDir() / "models";
+    int            copied = 0;
+
+    for (const char *model : kModels) {
+        const std::uintmax_t size = dc::data::DataFileSize(model);
+        if (size == 0) {
+            LogLine("models.txt", std::format("{}: not in the game data", model));
+            continue;
+        }
+
+        std::vector<char> buffer(static_cast<size_t>((size + kSector - 1) / kSector * kSector + kSector));
+        int               read = 0;
+        if (!dc::data::DataReadLoadFile(model, buffer.data(), &read) || read <= 0) {
+            LogLine("models.txt", std::format("{}: could not be read", model));
+            continue;
+        }
+        dc::data::DataReadForgetPackCapacities(buffer.data());
+
+        std::error_code error;
+        const fs::path  out = root / model;
+        fs::create_directories(out.parent_path(), error);
+        std::ofstream file(out, std::ios::binary | std::ios::trunc);
+        file.write(buffer.data(), std::min<std::streamsize>(read, static_cast<std::streamsize>(size)));
+        LogLine("models.txt", std::format("{}: {} bytes", model, size));
+        copied++;
+    }
+
+    LogLine("models.txt", std::format("{} of {} models copied", copied, kModels.size()));
 }
 
 // ── Walking the town as an ally ────────────────────────────────────────────────────────────────
@@ -162,6 +227,8 @@ void TownAllySelect(int chara) {
 }
 
 void TownAllyMapLoaded() {
+    // Dark Cloud Expanded: copies the moveset source models out once (see DumpTownModels).
+    DumpTownModels();
     g_ally = 0;
     g_pending = -1;
     g_fishing_ally = -1;
