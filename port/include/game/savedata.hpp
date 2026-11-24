@@ -3,6 +3,7 @@
 #include "common.h"
 
 #include <cstring>
+#include <span>
 
 #include "dngstatusdata.hpp"
 #include "stockitem.hpp"
@@ -229,6 +230,12 @@ public:
      * Returns a leaderboard entry, or nullptr if the entry is empty.
      */
     SV_FISH_DATA *GetFishingRank(int rank_index);
+
+    /**
+     * Dark Cloud Expanded: the whole leaderboard, all 64 entries, empty ones included, so the
+     * records can be rewritten to one best catch per species.
+     */
+    std::span<SV_FISH_DATA, 64> FishingRanks() { return fish_data; }
 
     /**
      * Returns the Georama data of a town, or nullptr if the town number is not valid.

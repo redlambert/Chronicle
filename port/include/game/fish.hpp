@@ -234,4 +234,9 @@ float FishSizeLift(float range);
  */
 float SmoothFishSize(float size, float base_size, float max_size);
 
+/**
+ * The fixed attributes of a fish kind, or nullptr for a kind the table does not have.
+ */
+const FishInfo *GetFishInfo(int fish_kind);
+
 } // namespace dc::game

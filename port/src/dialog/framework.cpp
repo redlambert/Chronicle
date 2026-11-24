@@ -317,10 +317,21 @@ FrameNode MakeHubNode(const NpcContext &ctx, std::vector<ChoiceItem> injected_ch
     talk_item.on_select = [](ISessionController &ctrl) {
         ctrl.PlayOriginalMessage();
     };
+
+    // Dark Cloud Expanded: a quest on offer starts from "Talk" (quest talk menus).
+    for (ChoiceItem &item : injected_choices) {
+        if (item.replaces_talk && item.on_select) {
+            talk_item.on_select = std::move(item.on_select);
+            break;
+        }
+    }
+
     hub_choices.push_back(std::move(talk_item));
 
     for (ChoiceItem &item : injected_choices) {
-        hub_choices.push_back(std::move(item));
+        if (!item.replaces_talk) {
+            hub_choices.push_back(std::move(item));
+        }
     }
 
     ChoiceItem leave_item;

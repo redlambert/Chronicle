@@ -18,6 +18,7 @@
 #include "dataset.hpp"
 #include "ebattle.hpp"
 
+#include "expanded_fishing.hpp"
 #include "expanded_weapons.hpp"
 #include "edit.hpp"
 #include "editground.hpp"
@@ -2101,6 +2102,16 @@ void EdMoveChara() {
         static int st_cnt = 0;
         static int wait_cnt = 0;
 
+        // Dark Cloud Expanded: the camera's distance and turn while fishing, put back once a catch has
+        // been shown, which closes the camera in on the angler.
+        static float kept_distance = -1.0f;
+        static float kept_angle = 0.0f;
+
+        if (chara_fishing != ED_FISHING_LANDED && chara_fishing != ED_FISHING_RESULT && chara_fishing != ED_FISHING_FINISH) {
+            kept_distance = camera->GetDistance();
+            kept_angle = camera->next_angle;
+        }
+
         switch (chara_fishing) {
             case ED_FISHING_INIT:
                 chara_fishing = ED_FISHING_STAND;
@@ -2386,6 +2397,8 @@ void EdMoveChara() {
                                 SaveData->SetFishingRank(fish_kind, static_cast<float>(size));
                                 // Dark Cloud Enhanced: the fishing quests count the catch.
                                 quest::EnhancedFishCaught(MapNo, fish_kind, size);
+                                // Dark Cloud Expanded: one best catch per species, and Arise Mardan's Max Magic.
+                                expanded::FishRecordsUpdate();
                                 fishing_mes++;
                                 EditMes1.mes_no[0] = GetFishMsgNo(fish_kind);
                                 EditMes1.values[0] = size;
@@ -2439,6 +2452,12 @@ void EdMoveChara() {
                     FishingDeleteAngleFish();
                     FishingAngleFish(-1);
                     FishingInitFishStatus();
+
+                    // Dark Cloud Expanded: the fishing camera comes back from the close-up.
+                    if (kept_distance > 0.0f) {
+                        camera->SetDistance(kept_distance);
+                        camera->SetAngle(kept_angle);
+                    }
                 }
 
                 hook_weight = float_weight = 1.0f;
@@ -2447,12 +2466,11 @@ void EdMoveChara() {
                 break;
         }
 
-        // The camera watches the point halfway between the angler and the float.
+        // Dark Cloud Expanded: the camera watches the float itself, not the point halfway between the
+        // angler and the float.
         if (follow_line != 0) {
             sceVu0FVECTOR centre;
             FishLineGetUki(centre);
-            sceVu0AddVector(centre, centre, pos);
-            sceVu0ScaleVector(centre, centre, 0.5f);
             camera->SetFollow(centre[0], centre[1], centre[2]);
         }
 
@@ -2530,6 +2548,8 @@ void EdMoveChara() {
         FishLineGetUki(before);
         FishLineStep(rod, rod);
         FishingStepFish();
+        // Dark Cloud Expanded: fish turn toward the angler (fish steering).
+        expanded::FishingSteer(rod);
         FishLineGetUki(after);
         // The float throws up ripples where it crosses the surface.
         float water_level = FishingGetWaterLevel();

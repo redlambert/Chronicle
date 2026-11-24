@@ -1,5 +1,6 @@
 #include "fishing.hpp"
 
+#include "expanded_fishing.hpp"
 #include "expanded_weapons.hpp"
 
 #include <libgraph.h>
@@ -22,6 +23,7 @@
 #include "mathutil.hpp"
 #include "mds.hpp"
 #include "mglib.hpp"
+#include "quest/enhanced.hpp"
 #include "render/draw2d.hpp"
 #include "render/gs_state.hpp"
 #include "runscript.hpp"
@@ -143,9 +145,13 @@ void FishingLoad(CDataAlloc2<1> *alloc, int slot) {
 void FishingLoadFish(int spot, CDataAlloc2<1> *alloc, int slot) {
     draw_under_water = 1;
 
-    if (spot == 3) {
+    // Dark Cloud Enhanced and Expanded: Sam's special reward lets the fish of the Queens Sea be seen.
+    if (spot == 3 && !quest::EnhancedQueensFishSeen()) {
         draw_under_water = 0;
     }
+
+    // Dark Cloud Expanded: the Mardan swords' bonuses for this session.
+    expanded::FishingSessionStart(spot);
 
     Fish = new (reinterpret_cast<u_long128 *>(alloc->Alloc(0xD8C))) CFish[6];
     fish_texb = slot;
@@ -300,7 +306,11 @@ void FishingLoadFish(int spot, CDataAlloc2<1> *alloc, int slot) {
             kind = fish_type[spot][i % 5];
         }
 
+        // Dark Cloud Expanded: Mardan Twei and Arise Mardan's second Garayan roll, then the swords'
+        // Fishing Points and Arise Mardan's sizes.
+        kind = expanded::FishKind(kind);
         LoadFish(&Fish[i], kind, slot, alloc, loaded);
+        expanded::FishLoaded(&Fish[i]);
         loaded = true;
     }
 }
@@ -756,15 +766,16 @@ int FishingCheckUkiHook() {
 
     float water = 5.0f + FishingGetWaterLevel();
 
-    if (hook_pos[1] > water) {
-        return 1;
+    if (hook_pos[1] <= water && uki_pos[1] <= water) {
+        return 0;
     }
 
-    if (uki_pos[1] > water) {
-        return 1;
-    }
+    // Dark Cloud Expanded: a float above the water only spoils the cast once it has come to rest, so
+    // a long cast still in the air is left to land.
+    constexpr float kSettledSpeed = 0.0498f;
+    float           speed = ukiv[0][0] * ukiv[0][0] + ukiv[0][1] * ukiv[0][1] + ukiv[0][2] * ukiv[0][2];
 
-    return 0;
+    return speed < kSettledSpeed ? 1 : 0;
 }
 
 void FishLineStep(float *rod_position, float * /*unused*/) {

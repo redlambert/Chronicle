@@ -374,6 +374,7 @@ public:
         Text                label;
         dialog::ChoiceColor color = dialog::ChoiceColor::White;
         SceneFn             on_select;
+        bool                replaces_talk = false; /**< Dark Cloud Expanded: runs from the NPC's "Talk" instead of a line of its own. */
     };
 
     struct Takeover {
@@ -431,6 +432,11 @@ public:
      */
     Builder &Option(NpcMatch npc, Condition when, Text label, SceneFn on_select,
                     dialog::ChoiceColor color = dialog::ChoiceColor::White);
+    /**
+     * Dark Cloud Expanded's quest talk menus: while when holds, the NPCs npc matches start the scene
+     * from "Talk" instead of saying their own words, and the menu gets no line for it.
+     */
+    Builder &TalkOption(NpcMatch npc, Condition when, SceneFn on_select);
     /**
      * Holds retail's own behaviour back for the NPCs npc matches: the quest does it instead.
      */

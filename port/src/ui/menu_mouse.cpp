@@ -1048,7 +1048,8 @@ void JournalMouse(const MenuPointerTake &take) {
     if (ManualMenu.mode == 100) {
         journal_chest::HandlePointer(x, y);
     } else if (ManualMenu.mode == MANUAL_MODE_SELECT && ManualMenu.selection_level == -2) {
-        if (x >= 135 && x < 355 && y >= 96 && y < 236) {
+        // Six categories, the quest tracker (Dark Cloud Expanded) last.
+        if (x >= 135 && x < 355 && y >= 96 && y < 264) {
             ManualMenu.category = static_cast<int>((y - 96) / 28);
             MenuPointerPress(kInputCross);
         }

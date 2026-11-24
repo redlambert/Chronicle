@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <print>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -137,6 +138,36 @@ void ApplySpacing(std::string &text) {
     text = std::move(out);
 }
 
+/**
+ * The Fairy King's line about calling allies (Town/Dialogues.cs FixFairyKingDialogue): Expanded
+ * lets allies be played in town too, so its first page says they can be called everywhere in the
+ * world. Expanded rewrites the page by its place in memory; here it is found by its words, a first
+ * page about allies that trails off "but however...".
+ */
+void FixFairyKing(std::string &text) {
+    constexpr std::string_view kPage = "{page}";
+    constexpr std::string_view kTrail = "however...";
+    constexpr std::string_view kLine = "You can call your allies everywhere\nin the world, but however...";
+
+    const size_t      end = text.find(kPage);
+    const std::string first = text.substr(0, end);
+
+    if (first.find("allies") == std::string::npos || first == kLine) {
+        return;
+    }
+
+    if (!first.ends_with(kTrail)) {
+        if (first.find("call") != std::string::npos) {
+            std::println("[FairyKing] a line about calling allies was left as it is: {}", first);
+        }
+
+        return;
+    }
+
+    text.replace(0, first.size(), kLine);
+    std::println("[FairyKing] line fixed (was: {})", first);
+}
+
 } // namespace
 
 short *FixText(short *text) {
@@ -176,6 +207,7 @@ short *FixText(short *text) {
 
     std::string fixed = decoded;
     ApplyFixes(fixed);
+    FixFairyKing(fixed);
 
     // Values, icons and other codes mark tables and menus, whose spacing is alignment.
     if (fixed.find('{') == std::string::npos) {

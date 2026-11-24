@@ -302,6 +302,16 @@ Builder &Builder::Option(NpcMatch npc, Condition when, Text label, SceneFn on_se
     return *this;
 }
 
+Builder &Builder::TalkOption(NpcMatch npc, Condition when, SceneFn on_select) {
+    quest.options.push_back({.npc = std::move(npc),
+                             .when = std::move(when),
+                             .label = {},
+                             .color = dialog::ChoiceColor::White,
+                             .on_select = std::move(on_select),
+                             .replaces_talk = true});
+    return *this;
+}
+
 Builder &Builder::TakesOver(NpcMatch npc, Retail behaviour) {
     quest.takeovers.push_back({.npc = std::move(npc), .behaviour = behaviour});
     return *this;
@@ -410,6 +420,7 @@ void CollectOptions(const dialog::NpcContext &npc, std::vector<dialog::ChoiceIte
             if (option.npc.Matches(npc) && (!option.when || option.when(ctx))) {
                 out.push_back(MakeChoice(entry->quest.Id(), entry->quest.Id() + ".option" + std::to_string(index),
                                          option.label, option.on_select, option.color));
+                out.back().replaces_talk = option.replaces_talk;
             }
         }
     }

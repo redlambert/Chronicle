@@ -83,6 +83,7 @@ struct ChoiceItem {
     ChoiceColor                               color = ChoiceColor::White;
     bool                                      enabled = true;
     std::function<void(ISessionController &)> on_select; /**< Runs when confirmed; empty closes the session. */
+    bool                                      replaces_talk = false; /**< Dark Cloud Expanded: an NPC menu's "Talk" runs this choice's on_select in place of the NPC's own words, and the choice gets no line of its own. */
 };
 
 /**

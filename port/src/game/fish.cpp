@@ -328,7 +328,9 @@ void CFish::Step() {
         CBoxVu0 box;
         box.max[0] = position[0] + 10.0f;
         box.max[1] = position[1] + 10.0f;
-        box.max[2] = position[2];
+        // Dark Cloud Expanded: the box reaches 10 toward +Z as it does toward -Z, so a thin wall on that
+        // side is gathered before the fish swims through it.
+        box.max[2] = position[2] + 10.0f;
         box.min[0] = position[0] - 10.0f;
         box.min[1] = position[1];
         box.min[2] = position[2] - 10.0f;
@@ -519,6 +521,14 @@ void LoadFish(CFish *fish, int fish_kind, int texture_slot, CDataAlloc2<1> *allo
     fish->info = fish_info[fish_kind];
     fish->SetScale();
     fish->fish_kind = fish_kind;
+}
+
+const FishInfo *GetFishInfo(int fish_kind) {
+    if (fish_kind < 0 || std::cmp_greater_equal(fish_kind, fish_info.size())) {
+        return nullptr;
+    }
+
+    return &fish_info[fish_kind];
 }
 
 char *GetFishFileName(int fish_kind) {

@@ -33,6 +33,7 @@
 #include "texture.hpp"
 #include "ui/framework.hpp"
 #include "ui/journal_chest.hpp"
+#include "ui/journal_quest.hpp"
 #include "userstatus.hpp"
 
 namespace dc::game {
@@ -129,6 +130,10 @@ namespace {
 
 // Port-only mode for the Miracle Chests tracker, outside the retail ManualMenuMode range.
 constexpr s16 kManualModeTracker = 100;
+
+// Dark Cloud Expanded: port-only mode for the quest tracker, the Journal's sixth category.
+constexpr s16 kManualModeQuests = 101;
+constexpr int kCategoryQuests = 5;
 
 ui::Cursor s_menu_cursor;
 
@@ -380,17 +385,18 @@ void DrawCategoryMenu() {
     const int     alpha = (ManualMenu.selection_level == -1) ? 0x40 : 0x80;
     constexpr int spacing = 28;
 
-    ui::TrackerWindow::Draw(135, 85, 220, 170, alpha, ui::BLUE_STONE_MENU);
+    ui::TrackerWindow::Draw(135, 85, 220, 198, alpha, ui::BLUE_STONE_MENU);
     MenuTextureReload(0x1A);
 
-    const std::array<std::string, 5> categories = {
+    const std::array<std::string, 6> categories = {
         LocalizeText("manual.category.georama", "Georama"),
         LocalizeText("manual.category.dungeon", "Dungeon"),
         LocalizeText("manual.category.weapon", "Weapon"),
         LocalizeText("manual.category.savings", "Savings/Other"),
-        LocalizeText("manual.category.miracle_chests", "Miracle Chests")};
+        LocalizeText("manual.category.miracle_chests", "Miracle Chests"),
+        LocalizeText("manual.category.quests", "Quests")};
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < static_cast<int>(categories.size()); i++) {
         const u32 color = (i == ManualMenu.category && ManualMenu.selection_level == -2)
                               ? ui::ColorYellow
                               : ui::ColorWhite;
@@ -439,7 +445,7 @@ int MenuManualKey() {
             int *selection = nullptr;
 
             if (ManualMenu.selection_level == -2) {
-                maximum = 4;
+                maximum = kCategoryQuests;
                 selection = &ManualMenu.category;
             } else if (ManualMenu.selection_level == -1) {
                 constexpr std::array k_entry_max = {4, 4, 3, 2};
@@ -490,6 +496,9 @@ int MenuManualKey() {
                     if (ManualMenu.category == 4) {
                         ManualMenu.mode = kManualModeTracker;
                         ui::journal_chest::Open();
+                    } else if (ManualMenu.category == kCategoryQuests) {
+                        ManualMenu.mode = kManualModeQuests;
+                        ui::journal_quest::Open();
                     } else {
                         ManualMenu.selection_level++;
                         CommonMenuMes3.cursor_row = 0;
@@ -517,6 +526,12 @@ int MenuManualKey() {
 
         case kManualModeTracker:
             if (ui::journal_chest::HandleKey()) {
+                ManualMenu.mode = MANUAL_MODE_SELECT;
+            }
+            break;
+
+        case kManualModeQuests:
+            if (ui::journal_quest::HandleKey()) {
                 ManualMenu.mode = MANUAL_MODE_SELECT;
             }
             break;
@@ -593,6 +608,11 @@ void MenuManualDraw() {
         return;
     }
 
+    if (ManualMenu.mode == kManualModeQuests) {
+        ui::journal_quest::Draw();
+        return;
+    }
+
     if (ManualMenu.mode >= MANUAL_MODE_OPENING && ManualMenu.mode < MANUAL_MODE_COUNT && ManualMenu.images_ready != 0) {
         MenuTextureReload(ManualMenu.image_texture_block);
         const int  image_count = std::clamp(GetNowManualPartTgaNum(), 0, static_cast<int>(std::size(ManualMenuTex)));
@@ -649,8 +669,10 @@ std::vector<std::pair<std::string, std::string>> JournalStrings() {
         {"manual.category.weapon",         "Weapon"        },
         {"manual.category.savings",        "Savings/Other" },
         {"manual.category.miracle_chests", "Miracle Chests"},
+        {"manual.category.quests",         "Quests"        },
     };
     ui::journal_chest::AppendStrings(out);
+    ui::journal_quest::AppendStrings(out);
     return out;
 }
 

@@ -4,6 +4,9 @@
 // is a quest of the port's quest framework, kept in quests.json; these are the hooks the dungeon,
 // the fishing and the item code call so the quests see what happens there.
 
+#include <string>
+#include <vector>
+
 namespace dc::game {
 struct MONSTOR;
 }
@@ -48,5 +51,23 @@ int EnhancedEdenLimit(int limit);
  * quests are open, so the gauge reaches 12 drops.
  */
 float EnhancedGourdLimit();
+
+/**
+ * Whether Sam's special reward has been given: the fish of the Queens Sea can be seen while fishing.
+ */
+bool EnhancedQueensFishSeen();
+
+/**
+ * One quest under way, as the Journal's quest tracker lists it.
+ */
+struct TrackedQuest {
+    std::string giver; /**< Who gave it, and their town. */
+    std::string task;  /**< What is left to do. */
+};
+
+/**
+ * Dark Cloud Expanded's quest tracker: every quest under way, or done and waiting for its reward.
+ */
+std::vector<TrackedQuest> EnhancedTrackedQuests();
 
 } // namespace dc::quest

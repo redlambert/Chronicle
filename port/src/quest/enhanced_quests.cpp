@@ -31,6 +31,11 @@
 //   Yellow Drops     A puzzle of four items in the bag's first slots: the Magical Crystal
 //   Pickle           Counts the collection; all of it gives the Flame Key and opens the Mayor's quests
 //   Mayor            Clear a Demon Shaft back floor with one ally: a stat item, until all are maxed
+//   Mint             Dark Cloud Expanded: catch all 17 kinds of fish: the Saving Book
+//
+// Dark Cloud Expanded's quest talk menus: while a hunt, a fishing quest, a rumour or the Mayor's
+// bonus quests are on offer, the villager's "Talk" starts it and the menu has no line for it;
+// while one is under way the menu gains "About the quest." instead.
 
 namespace dc::quest {
 
@@ -105,6 +110,17 @@ constexpr std::array<std::string_view, 7> kDungeonNames = {"Divine Beast Cave", 
                                                            "Demon Shaft"};
 
 constexpr Text kNoRoom = {"quest.enhanced.no_room", "Your bag is full. Make some room and come back for your reward."};
+constexpr Text kAboutQuest = {"quest.expanded.about", "About the quest."};
+
+// Dark Cloud Expanded's quest talk menus: on offer, "Talk" starts the quest.
+Condition OnOffer(std::initializer_list<std::string_view> stages) {
+    return AtStages(stages);
+}
+
+// Under way: the menu gains "About the quest.".
+Condition UnderWay(std::initializer_list<std::string_view> stages) {
+    return AtStages(stages);
+}
 
 // ── Monster hunts ────────────────────────────────────────────────────────────────────────────
 
@@ -235,10 +251,13 @@ void TalkHunt(Scene &scene, const Hunter &hunter) {
 }
 
 Definition HuntQuest(const Hunter &hunter) {
+    const NpcMatch npc = Villager(hunter.map_no, hunter.model_code);
+    const SceneFn  talk = [&hunter](Scene &scene) { TalkHunt(scene, hunter); };
+
     return Builder(std::string(hunter.id))
         .Stages({"new", "idle", "active", "done"})
-        .Option(Villager(hunter.map_no, hunter.model_code), Always(), kHuntLabel,
-                [&hunter](Scene &scene) { TalkHunt(scene, hunter); })
+        .TalkOption(npc, OnOffer({"new", "idle"}), talk)
+        .Option(npc, UnderWay({"active", "done"}), kAboutQuest, talk)
         .Build();
 }
 
@@ -300,6 +319,19 @@ constexpr Text kFishSizeGoing = {"quest.enhanced.fish.size_going",
                                  "You're still on the quest to catch any fish of a size from %1 cm to %2 cm %3. Good luck!"};
 constexpr Text kFishReward = {"quest.enhanced.fish.reward", "Nicely done! Here's your reward: %1 Fishing Points!"};
 
+// Sam's special reward (Enhanced and Expanded): three of his quests done, the fish of the Queens Sea
+// can be seen while fishing there.
+constexpr int  kSamQuestsForReward = 3;
+constexpr Text kSamMore = {"quest.enhanced.fish.sam.more",
+                           "Additionally, if you can complete %4 more quests for me, I'll give you a special reward!"};
+constexpr Text kSamRewardMore = {"quest.enhanced.fish.sam.reward_more",
+                                 "Nicely done! Here's your reward: %1 Fishing Points!{page}"
+                                 "If you can complete %2 more quests for me, I'll give you a special reward!"};
+constexpr Text kSamSpecial = {"quest.enhanced.fish.sam.special",
+                              "Awesome, you completed 3 quests for me!{page}"
+                              "As a special reward, you can now see the fish at the Queens Sea! Cool, right?{page}"
+                              "I'll also give the regular quest reward: here's %1 Fishing Points!"};
+
 // Where the quest's fish swim: spot 0 is Matataki's pond, 1 its waterfall, 2 anywhere in the village.
 std::string_view FishPlace(int town, int spot) {
     switch (town) {
@@ -327,8 +359,11 @@ std::string_view FishName(int town, int spot, int fish) {
     }
 }
 
-void GiveCatchQuest(Scene &scene, int town) {
-    int fish = 0;
+void SayFishing(Scene &scene, const Angler &angler, Text text, std::vector<std::string> args);
+
+void GiveCatchQuest(Scene &scene, const Angler &angler) {
+    const int town = angler.town;
+    int       fish = 0;
     int kind = 0;
     int needed = 2;
     int spot = 2;
@@ -379,10 +414,12 @@ void GiveCatchQuest(Scene &scene, int town) {
     scene.SetVar("needed", needed);
     scene.SetVar("left", needed);
     scene.SetStage("active");
-    scene.Say(kFishCatch, {std::to_string(needed), std::string(FishName(town, spot, fish)), std::string(FishPlace(town, spot))});
+    SayFishing(scene, angler, kFishCatch,
+               {std::to_string(needed), std::string(FishName(town, spot, fish)), std::string(FishPlace(town, spot))});
 }
 
-void GiveSizeQuest(Scene &scene, int town) {
+void GiveSizeQuest(Scene &scene, const Angler &angler) {
+    const int                                          town = angler.town;
     static constexpr std::array<std::array<int, 3>, 4> kSizes = {{{80, 141, 5}, {80, 141, 5}, {90, 161, 10}, {100, 181, 5}}};
     const auto &range = kSizes[town];
     const int   least = Rand(range[0], range[1]);
@@ -391,7 +428,7 @@ void GiveSizeQuest(Scene &scene, int town) {
     scene.SetVar("min", least);
     scene.SetVar("max", least + range[2]);
     scene.SetStage("active");
-    scene.Say(kFishSize, {std::to_string(least), std::to_string(least + range[2]), std::string(FishPlace(town, 2))});
+    SayFishing(scene, angler, kFishSize, {std::to_string(least), std::to_string(least + range[2]), std::string(FishPlace(town, 2))});
 }
 
 int FishReward(const Scene &scene, int town) {
@@ -410,6 +447,31 @@ int FishReward(const Scene &scene, int town) {
     return points;
 }
 
+// Sam's quests still to do for his special reward, 0 once it is given.
+int SamQuestsLeft(const Scene &scene, const Angler &angler) {
+    if (angler.town != kQueens) {
+        return 0;
+    }
+
+    return std::max(0, kSamQuestsForReward - scene.Var("completed"));
+}
+
+// A fishing quest's own line, with Sam's reminder of his special reward on a page after it.
+void SayFishing(Scene &scene, const Angler &angler, Text text, std::vector<std::string> args) {
+    const int left = SamQuestsLeft(scene, angler);
+
+    if (left <= 0) {
+        scene.Say(text, std::move(args));
+        return;
+    }
+
+    args.resize(3);
+    args.push_back(std::to_string(left));
+    const std::string line = localize::LocalizeText(text.key, text.english) + "{page}" +
+                             localize::LocalizeText(kSamMore.key, kSamMore.english);
+    scene.Session().PushRawMessage(line, std::move(args));
+}
+
 void TalkFishing(Scene &scene, const Angler &angler) {
     const int town = angler.town;
 
@@ -418,19 +480,21 @@ void TalkFishing(Scene &scene, const Angler &angler) {
         scene.SetStage("idle");
     } else if (scene.AtStage("idle")) {
         if (Rand(0, 100) < 50) {
-            GiveCatchQuest(scene, town);
+            GiveCatchQuest(scene, angler);
         } else {
-            GiveSizeQuest(scene, town);
+            GiveSizeQuest(scene, angler);
         }
+
     } else if (scene.AtStage("active")) {
         const int spot = scene.Var("spot");
 
         if (scene.Var("type") == 0) {
-            scene.Say(kFishCatchGoing, {std::string(FishName(town, spot, scene.Var("fish"))), std::string(FishPlace(town, spot)),
-                                        std::to_string(scene.Var("left"))});
+            SayFishing(scene, angler, kFishCatchGoing,
+                       {std::string(FishName(town, spot, scene.Var("fish"))), std::string(FishPlace(town, spot)),
+                        std::to_string(scene.Var("left"))});
         } else {
-            scene.Say(kFishSizeGoing, {std::to_string(scene.Var("min")), std::to_string(scene.Var("max")),
-                                       std::string(FishPlace(town, 2))});
+            SayFishing(scene, angler, kFishSizeGoing,
+                       {std::to_string(scene.Var("min")), std::to_string(scene.Var("max")), std::string(FishPlace(town, 2))});
         }
     } else {
         const int points = FishReward(scene, town);
@@ -440,15 +504,32 @@ void TalkFishing(Scene &scene, const Angler &angler) {
         }
 
         scene.SetStage("idle");
-        scene.Say(kFishReward, {std::to_string(points)});
+
+        if (angler.town != kQueens || scene.Var("completed") >= kSamQuestsForReward) {
+            scene.Say(kFishReward, {std::to_string(points)});
+            return;
+        }
+
+        const int completed = scene.Var("completed") + 1;
+        scene.SetVar("completed", completed);
+
+        if (completed >= kSamQuestsForReward) {
+            SetFlag("queens_fish_seen", 1);
+            scene.Say(kSamSpecial, {std::to_string(points)});
+        } else {
+            scene.Say(kSamRewardMore, {std::to_string(points), std::to_string(kSamQuestsForReward - completed)});
+        }
     }
 }
 
 Definition FishingQuest(const Angler &angler) {
+    const NpcMatch npc = Villager(angler.town, angler.model_code);
+    const SceneFn  talk = [&angler](Scene &scene) { TalkFishing(scene, angler); };
+
     return Builder(std::string(angler.id))
         .Stages({"new", "idle", "active", "done"})
-        .Option(Villager(angler.town, angler.model_code), Always(), kFishLabel,
-                [&angler](Scene &scene) { TalkFishing(scene, angler); })
+        .TalkOption(npc, OnOffer({"new", "idle"}), talk)
+        .Option(npc, UnderWay({"active", "done"}), kAboutQuest, talk)
         .Build();
 }
 
@@ -551,9 +632,12 @@ void TalkRumour(Scene &scene, const Rumour &rumour) {
 }
 
 Definition RumourQuest(const Rumour &rumour) {
+    const SceneFn talk = [&rumour](Scene &scene) { TalkRumour(scene, rumour); };
+
     return Builder(std::string(rumour.id))
         .Stages({"new", "told"})
-        .Option(rumour.npc, Always(), kRumourLabel, [&rumour](Scene &scene) { TalkRumour(scene, rumour); })
+        .TalkOption(rumour.npc, OnOffer({"new"}), talk)
+        .Option(rumour.npc, UnderWay({"told"}), kAboutQuest, talk)
         .Build();
 }
 
@@ -905,6 +989,127 @@ bool MayorOpen() {
     return progress != nullptr && progress->stage != "locked";
 }
 
+// ── Mint: every kind of fish (Dark Cloud Expanded, Quests/MasterFishQuest.cs) ─────────────────
+
+constexpr int              kMintVillager = 5;
+constexpr std::string_view kMintId = "expanded_mint";
+
+struct FishKind {
+    int              kind;
+    std::string_view name;
+};
+
+// The 17 kinds, as the fishing tables number them (8 is the unused Missing Fish).
+constexpr std::array<FishKind, 17> kAllFish = {{{0, "Bobo"},
+                                                {1, "Gobbler"},
+                                                {2, "Nonky"},
+                                                {3, "Kaiji"},
+                                                {4, "Baku Baku"},
+                                                {5, "Mardan Garayan"},
+                                                {6, "Gummy"},
+                                                {7, "Niler"},
+                                                {9, "Umadakara"},
+                                                {10, "Tarton"},
+                                                {11, "Piccoly"},
+                                                {12, "Bon"},
+                                                {13, "Hamahama"},
+                                                {14, "Negie"},
+                                                {15, "Den"},
+                                                {16, "Heela"},
+                                                {17, "Baron Garayan"}}};
+
+constexpr Text kMintIntro = {"quest.expanded.mint.intro",
+                             "Do you like fishing? I have a great challenge for you.{page}"
+                             "Catch all 17 different types of fish, and I will reward you with a rare item!{page}"
+                             "You can talk to me again to know your current progress."};
+constexpr Text kMintLeft = {"quest.expanded.mint.left",
+                            "You still have to find the following fish:{page}%1{page}"
+                            "Come back when you have caught them! Good luck!"};
+constexpr Text kMintReward = {"quest.expanded.mint.reward",
+                              "So you have completed my challenge?{page}"
+                              "Cool, you truly are a Master of Fishing! Here, have this rare book that I found the other "
+                              "day.{page}"
+                              "I don't know what it does, but maybe some people collect them."};
+constexpr Text kMintHasBook = {"quest.expanded.mint.has_book",
+                               "I already gave you my reward, but if you somehow lose it you can ask for another!"};
+constexpr Text kMintLost = {"quest.expanded.mint.lost",
+                            "What? You lost the reward??{page}"
+                            "Well, I have another one here, don't lose it again!"};
+
+std::string FishFlag(int kind) {
+    return "fish_caught_" + std::to_string(kind);
+}
+
+// A kind counts once it has been landed: since this was ported, or in the fishing records before it.
+bool FishCaught(int kind) {
+    if (Flag(FishFlag(kind)) != 0) {
+        return true;
+    }
+
+    if (SaveData == nullptr) {
+        return false;
+    }
+
+    for (const SV_FISH_DATA &entry : SaveData->FishingRanks()) {
+        if (entry.rank > 0.0f && entry.fish_id == kind) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int FishKindsCaught() {
+    return static_cast<int>(std::ranges::count_if(kAllFish, [](const FishKind &fish) { return FishCaught(fish.kind); }));
+}
+
+// The kinds still to catch, four to a page.
+std::string FishStillToCatch() {
+    std::string list;
+    int         listed = 0;
+
+    for (const FishKind &fish : kAllFish) {
+        if (FishCaught(fish.kind)) {
+            continue;
+        }
+
+        if (listed > 0) {
+            list += listed % 4 == 0 ? "{page}" : "\n";
+        }
+
+        list += fish.name;
+        listed++;
+    }
+
+    return list;
+}
+
+void TalkMint(Scene &scene) {
+    if (scene.AtStage("new")) {
+        scene.Say(kMintIntro);
+        scene.SetStage("open");
+        return;
+    }
+
+    if (FishKindsCaught() < static_cast<int>(kAllFish.size())) {
+        scene.Say(kMintLeft, {FishStillToCatch()});
+        return;
+    }
+
+    if (scene.Game().HasItemAnywhere(ITEM_SAVING_BOOK)) {
+        scene.Say(kMintHasBook);
+        return;
+    }
+
+    if (!scene.Game().GiveItem(ITEM_SAVING_BOOK)) {
+        scene.Say(kNoRoom);
+        return;
+    }
+
+    scene.Say(scene.AtStage("rewarded") ? kMintLost : kMintReward);
+    scene.SetStage("rewarded");
+}
+
 // ── The floor challenges ─────────────────────────────────────────────────────────────────────
 
 enum class Challenge : u8 { None, Samba, Mayor };
@@ -1024,6 +1229,11 @@ void EnhancedMonsterDown(const MONSTOR &monster) {
 }
 
 void EnhancedFishCaught(int town, int kind, int size) {
+    // Dark Cloud Expanded: Mint's quest counts every kind landed.
+    if (kind >= 0) {
+        SetFlag(FishFlag(kind), 1);
+    }
+
     for (const Angler &angler : kAnglers) {
         Progress *progress = EditProgress(angler.id);
 
@@ -1126,6 +1336,172 @@ int EnhancedBackFloorItem(int dungeon) {
     return -1;
 }
 
+bool EnhancedQueensFishSeen() {
+    return Flag("queens_fish_seen") != 0;
+}
+
+// ── The quest tracker (Dark Cloud Expanded, Quests/QuestTracker.cs) ──────────────────────────
+
+namespace {
+
+constexpr std::array<std::string_view, 6> kAllyNames = {"Toan", "Xiao", "Goro", "Ruby", "Ungaga", "Osmond"};
+
+std::string_view TownName(int town) {
+    switch (town) {
+        case kNorune:
+            return "Norune";
+        case kMatataki:
+            return "Matataki";
+        case kQueens:
+            return "Queens";
+        case kMuska:
+            return "Muska Lacka";
+        case kBrownboo:
+            return "Brownboo";
+        case kYellowDrops:
+            return "Yellow Drops";
+        default:
+            return "";
+    }
+}
+
+std::string_view AnglerName(const Angler &angler) {
+    switch (angler.town) {
+        case kNorune:
+            return "Pike";
+        case kMatataki:
+            return "Pao";
+        case kQueens:
+            return "Sam";
+        default:
+            return "Devia";
+    }
+}
+
+struct RumourInfo {
+    std::string_view giver;
+    int              town;
+    std::string_view item;
+};
+
+RumourInfo RumourOf(const Rumour &rumour) {
+    switch (rumour.dungeon) {
+        case 0:
+            return {"Laura", kNorune, "a powder"};
+        case 1:
+            return {"Ro", kMatataki, "an ancient item"};
+        case 2:
+            return {"Phil", kQueens, "the Queen's wedding ring"};
+        case 3:
+            return {"Zabo", kMuska, "a mysterious powder"};
+        default:
+            return {"A villager", kBrownboo, "a rare artifact"};
+    }
+}
+
+TrackedQuest Tracked(std::string_view giver, int town, std::string task) {
+    return TrackedQuest{.giver = std::format("{} ({})", giver, TownName(town)), .task = std::move(task)};
+}
+
+std::string ReturnTo(std::string_view giver) {
+    return std::format("Done! Go back to {} for the reward", giver);
+}
+
+} // namespace
+
+std::vector<TrackedQuest> EnhancedTrackedQuests() {
+    std::vector<TrackedQuest> out;
+
+    for (const Hunter &hunter : kHunters) {
+        const Progress *progress = FindProgress(hunter.id);
+
+        if (progress == nullptr) {
+            continue;
+        }
+
+        if (progress->stage == "active") {
+            const int dungeon = std::clamp(VarOf(*progress, "dungeon"), 0, 5);
+            const int monster = std::clamp(VarOf(*progress, "monster"), 0, 3);
+            out.push_back(Tracked(hunter.name, hunter.map_no,
+                                  std::format("Defeat {} more {} in the {}", VarOf(*progress, "left"),
+                                              kHuntMonsters[dungeon][monster].name, kDungeonNames[dungeon])));
+        } else if (progress->stage == "done") {
+            out.push_back(Tracked(hunter.name, hunter.map_no, ReturnTo(hunter.name)));
+        }
+    }
+
+    for (const Angler &angler : kAnglers) {
+        const Progress *progress = FindProgress(angler.id);
+
+        if (progress == nullptr) {
+            continue;
+        }
+
+        const int town = angler.town;
+
+        if (progress->stage == "active") {
+            const int spot = VarOf(*progress, "spot");
+
+            if (VarOf(*progress, "type") == 0) {
+                const int needed = VarOf(*progress, "needed");
+                const int left = VarOf(*progress, "left");
+                out.push_back(Tracked(AnglerName(angler), town,
+                                      std::format("Catch {} {} {} ({}/{})", needed, FishName(town, spot, VarOf(*progress, "fish")),
+                                                  FishPlace(town, spot), needed - left, needed)));
+            } else {
+                out.push_back(Tracked(AnglerName(angler), town,
+                                      std::format("Catch a fish of {} to {} cm {}", VarOf(*progress, "min"),
+                                                  VarOf(*progress, "max"), FishPlace(town, 2))));
+            }
+        } else if (progress->stage == "done") {
+            out.push_back(Tracked(AnglerName(angler), town, ReturnTo(AnglerName(angler))));
+        }
+    }
+
+    const IGame *game = Game();
+
+    for (const Rumour &rumour : Rumours()) {
+        const Progress *progress = FindProgress(rumour.id);
+
+        if (progress == nullptr || progress->stage != "told" || (game != nullptr && game->HasItemAnywhere(rumour.item))) {
+            continue;
+        }
+
+        const RumourInfo info = RumourOf(rumour);
+        out.push_back(Tracked(info.giver, info.town,
+                              std::format("Find {} on the {}'s back floors", info.item, kDungeonNames[rumour.dungeon])));
+    }
+
+    if (const Progress *samba = FindProgress(kSambaId); samba != nullptr) {
+        if (samba->stage == "active") {
+            out.push_back(Tracked("Samba", kYellowDrops, "Clear Moon Sea floor 7's back floor with Toan and the Dagger only"));
+        } else if (samba->stage == "cleared") {
+            out.push_back(Tracked("Samba", kYellowDrops, ReturnTo("Samba")));
+        }
+    }
+
+    if (const Progress *mayor = FindProgress(kMayorId); mayor != nullptr) {
+        if (mayor->stage == "active") {
+            const int ally = std::clamp(VarOf(*mayor, "ally"), 0, 5);
+            out.push_back(Tracked("Mayor", kNorune,
+                                  std::format("Clear the back floor of Demon Shaft floor {} with only {}", VarOf(*mayor, "floor"),
+                                              kAllyNames[ally])));
+        } else if (mayor->stage == "cleared") {
+            out.push_back(Tracked("Mayor", kNorune, ReturnTo("the Mayor")));
+        }
+    }
+
+    if (const Progress *mint = FindProgress(kMintId); mint != nullptr && mint->stage == "open") {
+        const int caught = FishKindsCaught();
+        out.push_back(Tracked("Mint", kBrownboo,
+                              caught < static_cast<int>(kAllFish.size())
+                                  ? std::format("Catch every kind of fish ({}/{})", caught, kAllFish.size())
+                                  : ReturnTo("Mint")));
+    }
+
+    return out;
+}
+
 int EnhancedEdenLimit(int limit) {
     return MayorOpen() ? kBonusLife : limit;
 }
@@ -1163,9 +1539,17 @@ void RegisterEnhancedQuests() {
                  .Stages({"new", "open"})
                  .Option(VillagerNo(kBrownboo, 9), Always(), kPickleLabel, TalkPickle)
                  .Build());
+    // Locked, the Mayor keeps his own words behind "Talk" (they hand out Norune's supplies), and his
+    // quests' line with them; once open, his quest starts from "Talk".
     Register(Builder(std::string(kMayorId))
                  .Stages({"locked", "open", "active", "cleared", "finished"})
-                 .Option(NoruneMayor(), Always(), kMayorLabel, TalkMayor)
+                 .Option(NoruneMayor(), AtStage("locked"), kMayorLabel, TalkMayor)
+                 .TalkOption(NoruneMayor(), OnOffer({"open"}), TalkMayor)
+                 .Option(NoruneMayor(), UnderWay({"active", "cleared", "finished"}), kAboutQuest, TalkMayor)
+                 .Build());
+    Register(Builder(std::string(kMintId))
+                 .Stages({"new", "open", "rewarded"})
+                 .TalkOption(VillagerNo(kBrownboo, kMintVillager), Always(), TalkMint)
                  .Build());
 }
 
@@ -1177,7 +1561,8 @@ std::vector<Text> EnhancedQuestsTexts() {
                                kSambaReward, kSambaDone, kPuzzleTell, kPuzzleHint, kPuzzleSolved, kPuzzleDone,
                                kPickleLabel, kPickleIntro, kPickleCount, kPickleShort, kPickleKey, kPickleAll,
                                kMayorLabel, kMayorEarly, kMayorJourney, kMayorGenie, kMayorShaft, kMayorOpen,
-                               kMayorTask, kMayorReward, kMayorMaxed, kMayorFinished};
+                               kMayorTask, kMayorReward, kMayorMaxed, kMayorFinished, kAboutQuest, kSamMore,
+                               kSamRewardMore, kSamSpecial, kMintIntro, kMintLeft, kMintReward, kMintHasBook, kMintLost};
 
     for (const Rumour &rumour : Rumours()) {
         texts.push_back(rumour.tell);
