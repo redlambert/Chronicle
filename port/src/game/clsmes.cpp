@@ -25,6 +25,7 @@
 #include "character.hpp"
 #include "editpartsdata.hpp"
 #include "editpartsinfo.hpp"
+#include "enhanced_town.hpp"
 #include "gameutil.hpp"
 #include "localize/localize.hpp"
 #include "mglib.hpp"
@@ -195,6 +196,15 @@ std::optional<int> ResolveSystemCode(const ClsMes &mes, int code) {
     }
 }
 
+/**
+ * Dark Cloud Enhanced: while an ally walks the town in Toan's place, the game's own lines and the
+ * shop lines name the ally where they name Toan.
+ */
+int SpokenChara(int chara) {
+    const int ally = expanded::TownAlly();
+    return chara == 0 && ally > 0 && ally < 6 ? ally : chara;
+}
+
 } // namespace
 
 s16 ClsMes::GetGaijiW(int code) {
@@ -216,7 +226,7 @@ int ClsMes::GetNameLen(int chara) {
         return -1;
     }
 
-    const s16 *name = SaveData->GetCharaName(chara);
+    const s16 *name = SaveData->GetCharaName(SpokenChara(chara));
 
     for (int i = 0; i < 11; i++) {
         if (name[i] == 0) {
@@ -232,7 +242,7 @@ int ClsMes::GetNameWidth(int chara) {
         return -1;
     }
 
-    const s16 *name = SaveData->GetCharaName(chara);
+    const s16 *name = SaveData->GetCharaName(SpokenChara(chara));
     s16        width = 0;
 
     for (int i = 0; i < 11; i++) {
@@ -847,7 +857,7 @@ s16 *SetAndGetNameRegistTbl(int chara) {
 
     std::ranges::fill(NameRegistTbl[chara], static_cast<s16>(MES_CODE_NEWLINE));
 
-    const s16 *name = SaveData->GetCharaName(chara);
+    const s16 *name = SaveData->GetCharaName(SpokenChara(chara));
 
     for (int i = 0; i < 11; i++) {
         if (name[i] == 0) {

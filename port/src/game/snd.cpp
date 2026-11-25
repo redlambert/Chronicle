@@ -2396,11 +2396,23 @@ int SndSoundSyncBG() {
     return 0;
 }
 
+namespace {
+
+/**
+ * Dark Cloud Enhanced: whether a sound is one of a character's attack shouts, the voice rows 20 to
+ * 29 (Enhanced mutes rows 20 to 23 of each character's voice table).
+ */
+bool IsAttackVoice(int se_no) {
+    return se_no >= SE_CHARA_SHOUT && se_no < SE_CHARA_SHOUT + 10;
+}
+
+} // namespace
+
 void SndSePlay(int se_no, int vol, int voice) {
     const SND_SE_INFO *info = GetSeInfo(se_no);
 
-    // Dark Cloud Expanded: the Voices option silences the voice bank's port.
-    if (info != nullptr && !platform::ConfigGet().voices && GetPortNo(se_no) == MIDI_PORT_UNK_B) {
+    // Dark Cloud Enhanced: the Attack Voices option silences the characters' attack shouts.
+    if (info != nullptr && !platform::ConfigGet().voices && IsAttackVoice(se_no)) {
         return;
     }
 
@@ -2427,8 +2439,8 @@ namespace {
 void SndSePlay(int se_no, float volume, float pan, int voice) {
     const SND_SE_INFO *info = GetSeInfo(se_no);
 
-    // Dark Cloud Expanded: the Voices option silences the voice bank's port.
-    if (info != nullptr && !platform::ConfigGet().voices && GetPortNo(se_no) == MIDI_PORT_UNK_B) {
+    // Dark Cloud Enhanced: the Attack Voices option silences the characters' attack shouts.
+    if (info != nullptr && !platform::ConfigGet().voices && IsAttackVoice(se_no)) {
         return;
     }
 

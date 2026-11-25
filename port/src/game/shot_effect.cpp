@@ -163,6 +163,11 @@ void CSHOT_EFFECT::Step() {
         if (phase[slot] < 2) {
             // Dark Cloud Expanded: Mobius Ring's grown orbs hit as wide as they are drawn.
             result = checkCollision(hit_position, position, velocity[slot], effect_data->target, effect_data->radius[phase[slot]] * expanded::ShotRadiusScale(this, slot));
+
+            // Dark Cloud Expanded: Babel's Spear and the Cactus stop enemy shots like a wall.
+            if (result == SHOT_COLLISION_NONE && expanded::ShotBlocked(hit_position, effect_data->target)) {
+                result = SHOT_COLLISION_MAP;
+            }
         }
 
         if (life_time[slot] > 0) {
@@ -172,7 +177,15 @@ void CSHOT_EFFECT::Step() {
         if (!(effect_data->radius[phase[slot]] <= 0.0f) && life_time[slot] != 0) {
             // After each hit the effect waits its delay before it can hit again.
             if (wait_state[slot] <= 0) {
-                int hit = NowColData->Set(hit_position, damage[slot], 2, effect_data->radius[phase[slot]] * expanded::ShotRadiusScale(this, slot), 1.0f, effect_data->target, effect_data->hit_kind, effect_data->hit_flags, 0);
+                // Dark Cloud Expanded: Big Bang's wielder shrugs off the game's explosions.
+                int hit = -1;
+
+                if (!expanded::ShotSparesPlayer(effect_data)) {
+                    hit = NowColData->Set(hit_position, damage[slot], 2, effect_data->radius[phase[slot]] * expanded::ShotRadiusScale(this, slot), 1.0f, effect_data->target, effect_data->hit_kind, effect_data->hit_flags, 0);
+                }
+
+                // Dark Cloud Expanded: a confused enemy's shot hurts the other enemies too.
+                expanded::OnMonsterShot(user_id_2[slot], effect_data->target, hit_position, effect_data->radius[phase[slot]], damage[slot]);
 
                 if (hit != -1) {
                     NowColData->SetUserID(user_id[slot], user_sub_id[slot]);

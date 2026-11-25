@@ -707,7 +707,7 @@ constexpr Row kAudioRows[] = {
     OnOffRow<&Config::music>("audio.music", "Music", "\"Music\"\nAll music. Off from\nthe next song."),
     OnOffRow<&Config::battle_music>("audio.battle_music", "Battle Music",
                                     "\"Battle Music\"\nThe music near enemies\nin a dungeon. Off: the\nfloor's ambience only."),
-    OnOffRow<&Config::voices>("audio.voices", "Voices", "\"Voices\"\nThe characters' shouts\nin battle."),
+    OnOffRow<&Config::voices>("audio.voices", "Attack Voices", "\"Attack Voices\"\nThe characters' shouts\nas they attack."),
 };
 
 constexpr Row kControlRows[] = {

@@ -17,6 +17,7 @@ class CMonstorUnit;
 class CSHOT;
 class CSHOT_EFFECT;
 class ClsMes;
+struct BT_SHOT_EFFECT;
 struct MONSTOR;
 
 namespace expanded {
@@ -222,6 +223,29 @@ void OnMonsterAttack(int attacker, const float *at, float radius, int damage);
  * past the confused enemies' blows it may not take. -1 for none.
  */
 int MonsterHitFor(int victim, int hit, const float *position, float radius);
+
+/**
+ * A monster's shot reaches at this step: a confused or provoked shooter's shot is planted for the
+ * enemies too. target is the shot's own target mode.
+ */
+void OnMonsterShot(int attacker, int target, const float *at, float radius, int damage);
+
+/**
+ * Whether a shot aimed at the party at position is stopped by Babel's Spear or the Cactus
+ * standing in its way.
+ */
+bool ShotBlocked(const float *position, int target);
+
+/**
+ * Whether one of the game's explosion shots leaves the party alone: Big Bang's wielder is immune.
+ */
+bool ShotSparesPlayer(const BT_SHOT_EFFECT *shot);
+
+/**
+ * Whether a bomb's blast leaves the party alone, by the blast's target mode: Big Bang's wielder
+ * is immune.
+ */
+bool BombSparesPlayer(int target);
 
 /**
  * Dark Cloud Expanded: whether this monster's blows leave the party alone (the Pocklekul's

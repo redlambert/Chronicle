@@ -1,3 +1,4 @@
+#include "expanded_effects.hpp"
 #include "expanded_weapons.hpp"
 #include "dun/gameloop.hpp"
 
@@ -2129,7 +2130,9 @@ void Draw_MainUnit() {
 
     if (NowWeapon != nullptr && NowWeapon->frame != nullptr && BtActStatus.weapon_visible != 0) {
         TexManager.ReloadTexture(Vif1Packet, 0x1D);
+        expanded::fx::WeaponDraw(true); // Dark Cloud Expanded: the weapon effects' blade tints.
         NowWeapon->Draw();
+        expanded::fx::WeaponDraw(false);
     }
 
     expanded::DecoyDraw(saved_ambient); // Dark Cloud Expanded: the Mirage's decoy.
@@ -2225,6 +2228,8 @@ void DunMainDraw() {
         MGSetBGColor(sub_bgColor[0], sub_bgColor[1], sub_bgColor[2], 128.0f);
         MGSetFogParm(sub_fogRate[0], sub_fogRate[1], sub_fogColor[0], sub_fogColor[1], sub_fogColor[2], sub_fogRate[2], sub_fogRate[3]);
     }
+
+    expanded::fx::SceneLight(); // Dark Cloud Expanded: the weapon effects' flash and dim.
 
     if (BtItemListCashFlag != 0) {
         TexManager.ReloadTexture(Vif1Packet, 0x28);
@@ -2358,6 +2363,7 @@ void DunMainDraw() {
 
         NowMainEffect->Draw();
         expanded::StolenShotDraw(); // Dark Cloud Expanded: Steal Shot's stolen projectiles.
+        expanded::fx::Draw();       // Dark Cloud Expanded: the weapon effects' borrowed models.
     }
 
     sceVu0FVECTOR raster_pos;

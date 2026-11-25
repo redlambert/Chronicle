@@ -1,5 +1,6 @@
 #include "expanded_weapons.hpp"
 #include "expanded_enemies.hpp"
+#include "expanded_effects.hpp"
 
 #include <libvu0.h>
 
@@ -30,6 +31,7 @@
 #include "framevu1.hpp"
 #include "gameutil.hpp"
 #include "hitvalue.hpp"
+#include "itembombeffect.hpp"
 #include "mainselect.hpp"
 #include "menu_inventory.hpp"
 #include "mds.hpp"
@@ -617,6 +619,111 @@ int PlantBlast(const float *at, float damage_scale, bool guard_break, int no_kic
     return planted;
 }
 
+// ── What the effects look like ──────────────────────────────────────────────────────────────
+
+// The game's own effect models, the room's light and the tints, played through
+// expanded_effects.cpp. Each flash-bang sword has its look: its blade's tint while it charges and
+// stays primed, the glow on Toan while primed, the room's dim while primed, and the light its
+// flash washes the room with.
+struct SwordLook {
+    int   item_no;
+    float blade[3];
+    float glow[3];
+    float prime_dim;
+    float light[3];
+    float fog[3];
+    int   ease_steps;
+};
+
+constexpr int kBoltFlashSteps = 24;
+
+constexpr std::array<SwordLook, 3> kSwordLooks = {{
+    {ITEM_WEAPON_SUN_SWORD, {200.0f, 190.0f, 150.0f}, {70.0f, 50.0f, 10.0f}, 0.0f, {255.0f, 240.0f, 200.0f}, {255.0f, 255.0f, 255.0f}, 5 * kStepsPerSecond},
+    {ITEM_WEAPON_BIG_BANG, {110.0f, 150.0f, 255.0f}, {20.0f, 40.0f, 90.0f}, 0.35f, {220.0f, 230.0f, 255.0f}, {255.0f, 255.0f, 255.0f}, 5 * kStepsPerSecond},
+    {ITEM_WEAPON_SWORD_OF_ZEUS, {190.0f, 200.0f, 255.0f}, {30.0f, 30.0f, 60.0f}, 0.5f, {210.0f, 220.0f, 255.0f}, {200.0f, 210.0f, 255.0f}, kBoltFlashSteps},
+}};
+
+const SwordLook *LookOf(int item_no) {
+    for (const SwordLook &look : kSwordLooks) {
+        if (look.item_no == item_no) {
+            return &look;
+        }
+    }
+
+    return nullptr;
+}
+
+/**
+ * rgb scaled by k into out.
+ */
+void Scaled(const float *rgb, float k, float *out) {
+    out[0] = rgb[0] * k;
+    out[1] = rgb[1] * k;
+    out[2] = rgb[2] * k;
+}
+
+/**
+ * A slow pulse between 0.6 and 1, for a glow that breathes.
+ */
+float Pulse() {
+    return 0.8f + 0.2f * std::sin(static_cast<float>(g_step_count) * 0.1f);
+}
+
+float RandomYaw() {
+    return static_cast<float>(std::rand() % 628) / 100.0f;
+}
+
+/**
+ * The point over monster m's head: its feet in x and z, and the top of its highest hit sphere,
+ * or its feet when it has none live.
+ */
+void MonsterTop(int m, float *out) {
+    sceVu0FVECTOR feet;
+    NowMonstorUnit->chara[m][0].GetPosition(feet);
+    out[0] = feet[0];
+    out[1] = feet[1];
+    out[2] = feet[2];
+    out[3] = 1.0f;
+
+    const auto &spheres = NowMonstorUnit->effect[m];
+
+    for (int sphere = 0; sphere < 16; sphere++) {
+        if (spheres.timer[sphere] != 0) {
+            out[1] = std::max(out[1], spheres.position[sphere][1] + spheres.radius[sphere]);
+        }
+    }
+}
+
+// Big Bang's blast is the game's own bomb blast model; the bolt is the Divine Beast Cave
+// cutscene's lightning, ten times its size, with the Thunder Gem's crack and a short flash.
+constexpr float kExplosionScale = 1.0f;
+constexpr float kDetonateScale = 1.5f;
+constexpr float kLightningScale = 10.0f;
+constexpr int   kLightningStrike = 1; // lightning.cfg's playing clip (its first holds still)
+
+// Guardian Grace: a soft glow on Xiao while she guards, brightened a moment by each heal.
+constexpr float kGraceGlow[3] = {45.0f, 45.0f, 35.0f};
+constexpr float kGraceGlowFade = 0.05f;
+float           g_grace_glow = 0.0f;
+
+// The summons appear in Queens' smoke puff at half its size, played three times as fast.
+constexpr float kSmokeScale = 0.5f;
+constexpr float kSmokeRate = 3.0f;
+
+void Burst(const float *at, float scale) {
+    const float ground[4] = {at[0], at[1], at[2], 1.0f};
+    fx::Play(fx::Prop::Explosion, 0, ground, scale, RandomYaw());
+    SndSePlay(SE_EXPLOSION, -1, 0);
+}
+
+void BoltSeen(const float *at) {
+    const SwordLook &zeus = kSwordLooks[2];
+    const float      ground[4] = {at[0], at[1], at[2], 1.0f};
+    fx::Play(fx::Prop::Lightning, kLightningStrike, ground, kLightningScale, RandomYaw());
+    SndSePlay(SE_THUNDER_GEM, -1, 0);
+    fx::Flash(zeus.light, zeus.fog, kBoltFlashSteps);
+}
+
 // ── Sun Sword "Solar Flash" ─────────────────────────────────────────────────────────────────
 
 // Guard held a second and a half primes the blade; the next swing that lands lets it go. Every
@@ -676,6 +783,7 @@ void BoltOn(int m) {
     sceVu0FVECTOR at;
     NowMonstorUnit->chara[m][0].GetPosition(at);
     PlantBlast(at, kBoltDamage, true, m);
+    BoltSeen(at);
 }
 
 /**
@@ -754,6 +862,27 @@ void SolarStep(int held) {
 
             break;
     }
+
+    // The blade whitens as the guard charges it; primed, it stays lit, a glow breathes on Toan
+    // and the room darkens for the strike to come.
+    const SwordLook *look = LookOf(held);
+
+    if (look == nullptr || g_solar == Solar::Idle) {
+        return;
+    }
+
+    float tint[3];
+
+    if (g_solar == Solar::Charging) {
+        Scaled(look->blade, static_cast<float>(g_solar_steps) / kSolarChargeSteps, tint);
+        fx::WeaponTint(tint);
+        return;
+    }
+
+    fx::WeaponTint(look->blade);
+    Scaled(look->glow, Pulse(), tint);
+    fx::PlayerTint(tint);
+    fx::Dim(look->prime_dim);
 }
 
 /**
@@ -799,20 +928,30 @@ void SolarBlind() {
         monster.stop_timer = std::max(monster.stop_timer, kSolarBlindSteps);
     }
 
-    // A white pulse on Toan as the room is blinded.
+    // A white pulse on Toan as the room is blinded, and the room washed out with the sword's light.
     setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+
+    if (const SwordLook *look = LookOf(EffectItem(NowWeaponHave))) {
+        fx::Flash(look->light, look->fog, look->ease_steps);
+    }
 }
 
-void SolarFlash() {
-    if (g_solar != Solar::Primed || NowMonstorUnit == nullptr) {
+bool JudgementDrop();
+
+/**
+ * The primed flash let go on target, the enemy the swing was locked on (-1 for none).
+ */
+void SolarRelease(int target) {
+    if (NowMonstorUnit == nullptr || NowWeaponHave == nullptr) {
         return;
     }
 
-    g_solar = Solar::Idle;
+    const bool on_target = target >= 0 && target < 16 && NowMonstorUnit->monster[target].state == 2 &&
+                           NowMonstorUnit->monster[target].hp > 0;
 
     // Sword of Zeus: lightning with the flash, which costs nothing of its own.
     if (NowWeaponHave->item_no == ITEM_WEAPON_SWORD_OF_ZEUS) {
-        if (const int target = LockedTarget(); target >= 0) {
+        if (on_target) {
             BoltOn(target);
             DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
             g_zeus_chain = true;
@@ -828,16 +967,32 @@ void SolarFlash() {
     SolarBlind();
 
     // Detonate: locked on, the blast lands on the target, through any guard.
-    if (NowWeaponHave->item_no == ITEM_WEAPON_BIG_BANG && lockOnTargetFlag != 0 && lockOnTargetNo >= 0 && lockOnTargetNo < 16 &&
-        NowMonstorUnit->monster[lockOnTargetNo].state == 2 && NowMonstorUnit->monster[lockOnTargetNo].hp > 0) {
-        sceVu0FVECTOR target;
-        NowMonstorUnit->chara[lockOnTargetNo][0].GetPosition(target);
-        PlantBlast(target, 1.0f, true);
+    if (NowWeaponHave->item_no == ITEM_WEAPON_BIG_BANG && on_target) {
+        sceVu0FVECTOR at;
+        NowMonstorUnit->chara[target][0].GetPosition(at);
+        PlantBlast(at, 1.0f, true);
+        Burst(at, kDetonateScale);
         DrainWhp(ITEM_WEAPON_BIG_BANG, kDetonateWhp);
         return;
     }
 
     DrainWhp(NowWeaponHave->item_no, kSolarWhp);
+}
+
+void SolarFlash() {
+    if (g_solar != Solar::Primed || NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    g_solar = Solar::Idle;
+
+    // Big Bang and the Sword of Zeus: the judgement blade hanging over the locked-on enemy falls,
+    // and the flash waits for it to land.
+    if (JudgementDrop()) {
+        return;
+    }
+
+    SolarRelease(LockedTarget());
 }
 
 /**
@@ -899,10 +1054,22 @@ void ZeusStep(int held) {
             setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
         }
 
+        // The room darkens as the charge builds past the lunge's level, the blade whitening.
+        if (BtActStatus.charge_time >= kLungeCharge) {
+            const float k = g_zeus_charged ? 1.0f : 0.5f + 0.5f * static_cast<float>(g_zeus_charge_steps) / kZeusChargeSteps;
+            float       tint[3];
+            Scaled(kSwordLooks[2].blade, k, tint);
+            fx::WeaponTint(tint);
+            fx::Dim(0.75f * k);
+        }
+
         return;
     }
 
     if (action == kLunge && g_zeus_charged) {
+        fx::WeaponTint(kSwordLooks[2].blade);
+        fx::Dim(0.75f);
+
         if (!g_zeus_lunging) {
             g_zeus_lunging = true;
             g_zeus_lunge_from[0] = CharaMain.pos[0];
@@ -929,6 +1096,7 @@ void ZeusStep(int held) {
             }
 
             PlantBlast(at, kBoltDamage, true);
+            BoltSeen(at);
         }
 
         DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
@@ -1217,6 +1385,11 @@ constexpr int   kHerculesChargeSteps = 5 * kStepsPerSecond;
 constexpr int   kHerculesPrimedSteps = 18 * kStepsPerSecond;
 constexpr float kHerculesReach = 2.0f;
 constexpr float kHerculesWhp = 20.0f;
+constexpr float kHerculesGold[3] = {200.0f, 160.0f, 40.0f};
+constexpr float kHerculesDim = 0.3f;
+constexpr float kHerculesLight[3] = {255.0f, 230.0f, 150.0f};
+constexpr int   kHerculesFlashSteps = 40;
+constexpr int   kSparkleSwirl = 1; // e508_ex.cfg's long swirl
 
 enum class Wrath { Idle, Charging, Primed };
 
@@ -1255,6 +1428,18 @@ void HerculesStep(int held) {
             }
 
             break;
+    }
+
+    // The spear turns gold as the second level charges; primed, it stays gold and the room dims.
+    float tint[3];
+
+    if (g_wrath == Wrath::Charging && g_wrath_steps > kHerculesFirstSteps) {
+        const float k = static_cast<float>(g_wrath_steps - kHerculesFirstSteps) / kHerculesChargeSteps;
+        Scaled(kHerculesGold, k, tint);
+        fx::WeaponTint(tint);
+    } else if (g_wrath == Wrath::Primed) {
+        fx::WeaponTint(kHerculesGold);
+        fx::Dim(kHerculesDim);
     }
 }
 
@@ -1731,6 +1916,7 @@ struct Pellet {
     int   depart_steps = 0;    // steps it has spent leaving
     float kick_back = 0.0f;    // a charged pellet's kick, from this far behind it; 0 for none
     bool  crush = false;       // a Charging Bull pellet, which passes guards
+    int   sword = -1;          // Super Steve: the sword whose move a charged pellet carries
 };
 
 std::array<Pellet, 12> g_pellets;
@@ -2004,6 +2190,11 @@ void ChronicleSplash(const MONSTOR &hit, int owner, int amount) {
         NowMonstorUnit->chara[m][0].GetPosition(position);
         position[1] += 10.0f;
         HitValueEntry(NowHitValue, position, damage, HIT_VALUE_MONSTER, nullptr);
+
+        // A flash of the poison's colour on each enemy the splash reaches.
+        constexpr float kSplashFlash[3] = {110.0f, 60.0f, 140.0f};
+        constexpr int   kSplashFlashSteps = 20;
+        fx::MonsterTint(m, kSplashFlash, kSplashFlashSteps);
     }
 }
 
@@ -2054,7 +2245,10 @@ std::array<std::array<int, 16>, 16> g_friendly_ready{};
 std::array<FriendlyHit, 32>         g_friendly{};
 int                                 g_friendly_next = 0;
 
+void StarsReset();
+
 void ConfuseReset() {
+    StarsReset();
     g_confused_until = {};
     g_hit_by = {};
     g_friendly_ready = {};
@@ -2073,8 +2267,9 @@ void ConfuseReset() {
 // through it, and it cannot be locked on to. It grows in over its first frames. One stands at a
 // time; it goes when the weapon or the character changes, when it falls, when it is left 300
 // units behind, and with the floor. It gives no ABS and drops nothing.
-// Left out against Expanded: the summon smoke and its tint, and the pockles' thrown shots (their
-// shots can only strike the party, so a summoned pockle does not shoot).
+// It appears in the summon smoke, lit white as it grows in. Left out against Expanded: the
+// pockles' thrown shots (their shots can only strike the party, so a summoned pockle does not
+// shoot).
 
 constexpr std::array<int, 8>          kPockleKinds = {10, 11, 12, 13, 14, 15, 16, 54}; // MonstorTable: Sunday .. Saturday, Hell Pockle
 constexpr std::array<const char *, 8> kPockleNames = {"Sunday", "Monday", "Tuesday", "Wednesday",
@@ -2285,10 +2480,62 @@ int NextMonsterHit(int from, const float *position, float radius) {
 /**
  * Clears the confusion that has run out and forgets the attackers that came to their senses.
  */
+// The dizzy stars spin over the confused enemies nearest the player, a few at a time.
+constexpr int   kStarsMost = 6;
+constexpr float kStarsLift = 2.0f;
+constexpr float kStarsScale = 1.0f;
+
+std::array<int, 16> g_stars;
+
+void StarsReset() {
+    g_stars.fill(-1);
+}
+
+void StarsStep() {
+    std::array<std::pair<float, int>, 16> near;
+    int                                   count = 0;
+
+    for (int m = 0; m < 16; m++) {
+        if (ActiveMonster(m) && Confused(m)) {
+            near[count++] = {NowMonstorUnit->monster[m].player_distance, m};
+        }
+    }
+
+    std::sort(near.begin(), near.begin() + count);
+    std::array<bool, 16> shown{};
+
+    for (int i = 0; i < std::min(count, kStarsMost); i++) {
+        shown[near[i].second] = true;
+    }
+
+    for (int m = 0; m < 16; m++) {
+        if (!shown[m]) {
+            if (g_stars[m] >= 0) {
+                fx::Fade(g_stars[m]);
+                g_stars[m] = -1;
+            }
+
+            continue;
+        }
+
+        float top[4];
+        MonsterTop(m, top);
+        top[1] += kStarsLift;
+
+        if (!fx::Live(g_stars[m])) {
+            g_stars[m] = fx::Play(fx::Prop::Stars, 0, top, kStarsScale, 0.0f, true);
+        }
+
+        fx::Move(g_stars[m], top);
+    }
+}
+
 void ConfuseStep() {
     if (NowMonstorUnit == nullptr) {
         return;
     }
+
+    StarsStep();
 
     for (int m = 0; m < 16; m++) {
         if (g_confused_until[m] != 0 && !Confused(m)) {
@@ -2466,6 +2713,12 @@ void PockleSummon(int summoner) {
 
     setUnitAmbientAnime(15.0f, 1.0f, 150.0f, 100.0f, 120.0f);
     ShowDungeonMessage(std::format("{} summoned", kPockleNames[pick]), 150);
+
+    // It appears in a puff of smoke, lit white as it grows in.
+    constexpr float kSummonTint[3] = {120.0f, 120.0f, 120.0f};
+    constexpr int   kSummonTintSteps = 30;
+    fx::Play(fx::Prop::Smoke, 0, at, kSmokeScale, CharaMain.rotation.y, false, kSmokeRate);
+    fx::MonsterTint(m, kSummonTint, kSummonTintSteps);
 }
 
 /**
@@ -2584,9 +2837,8 @@ void PockleStep() {
 // a giant copy of themselves point-up out of the ground, and the Terra Sword drops a boulder on
 // the locked-on enemy. Each stands as a solid column for a while: enemies walk around it and the
 // player is held out of it, and what touches it is hit. One of each kind stands at a time; all go
-// with a weapon or party change and a new floor. Left out against Expanded: enemy shots pass
-// through, the Dark Genie's beam and the summon smoke are not drawn, and a copy sinks away instead
-// of fading.
+// with a weapon or party change and a new floor. Babel's Spear and the Cactus stop enemy shots.
+// Left out against Expanded: the Terra Sword's shadow, and a copy sinks away instead of fading.
 
 /**
  * A model drawn on the floor in place of where it belongs: the held weapon's frames laid out by a
@@ -2652,7 +2904,7 @@ struct FloorModel {
      * Draws it with its root at x, y, z, scaled, turned yaw about the vertical. A weapon is stood
      * on its tip axis; anything else is drawn as authored.
      */
-    void Draw(float x, float y, float z, float scale, float yaw) {
+    void Draw(float x, float y, float z, float scale, float yaw, bool point_down = false) {
         if (!Valid() || scale <= 0.0f) {
             return;
         }
@@ -2669,12 +2921,13 @@ struct FloorModel {
 
         if (weapon) {
             // The tip axis to up; the two others to the ground plane, kept right-handed.
-            const int b = (axis + 1) % 3;
-            const int d = (axis + 2) % 3;
+            const int   b = (axis + 1) % 3;
+            const int   d = (axis + 2) % 3;
+            const float up = point_down ? -sign : sign;
             const float flat_b[2] = {0.0f, 1.0f}; // to z
-            const float flat_d[2] = {sign, 0.0f}; // to x (mirrored with the tip)
+            const float flat_d[2] = {up, 0.0f};   // to x (mirrored with the tip)
 
-            place[axis][1] = sign * scale;
+            place[axis][1] = up * scale;
             place[b][0] = scale * (flat_b[0] * c + flat_b[1] * s);
             place[b][2] = scale * (-flat_b[0] * s + flat_b[1] * c);
             place[d][0] = scale * (flat_d[0] * c + flat_d[1] * s);
@@ -2711,6 +2964,134 @@ struct FloorModel {
         Invalidate(root);
     }
 };
+
+// ── The judgement blade: Big Bang and the Sword of Zeus ─────────────────────────────────────
+
+// While either sword is primed and locked on, a copy of it twice its size hangs point-down over
+// the target, growing in, and follows it. The primed swing lets it fall; where it lands the flash
+// goes off (Big Bang's blast or the Sword of Zeus's bolt with it). It shrinks away when the lock
+// or the prime goes.
+constexpr float kJudgementScale = 2.0f;
+constexpr float kJudgementHover = 6.0f;     // between the target's head and the blade's tip
+constexpr int   kJudgementGrowSteps = 15;
+constexpr float kJudgementGravity = 0.4f;   // units a step, each step
+
+struct Judgement {
+    FloorModel model;
+    bool       up = false;
+    bool       falling = false;
+    int        target = -1;
+    int        item = -1;
+    int        grow = 0;
+    float      x = 0.0f;
+    float      z = 0.0f;
+    float      ground = 0.0f;
+    float      tip_y = 0.0f;
+    float      speed = 0.0f;
+    float      yaw = 0.0f;
+};
+
+Judgement g_judgement;
+
+void JudgementEnd() {
+    g_judgement.up = false;
+    g_judgement.falling = false;
+    g_judgement.model.root = nullptr;
+    g_judgement.target = -1;
+}
+
+/**
+ * Over the target while it lives: its feet, and the hover height above its head.
+ */
+void JudgementFollow(float hover) {
+    Judgement &blade = g_judgement;
+
+    if (!ActiveMonster(blade.target)) {
+        return;
+    }
+
+    float top[4];
+    MonsterTop(blade.target, top);
+    blade.x = top[0];
+    blade.z = top[2];
+    blade.ground = NowMonstorUnit->chara[blade.target][0].pos[1];
+
+    if (hover >= 0.0f) {
+        blade.tip_y = top[1] + hover;
+    }
+}
+
+void JudgementStep(int held) {
+    Judgement &blade = g_judgement;
+    const bool toan_out = UserStatus->cur_chara == CHARA_TOAN;
+
+    if (blade.up && (!toan_out || held != blade.item || !blade.model.Valid())) {
+        JudgementEnd();
+    }
+
+    if (blade.falling) {
+        JudgementFollow(-1.0f);
+        blade.speed += kJudgementGravity;
+        blade.tip_y -= blade.speed;
+
+        if (blade.tip_y <= blade.ground) {
+            const int target = blade.target;
+            JudgementEnd();
+            SolarRelease(target);
+        }
+
+        return;
+    }
+
+    const int  target = LockedTarget();
+    const bool hang = toan_out && (held == ITEM_WEAPON_BIG_BANG || held == ITEM_WEAPON_SWORD_OF_ZEUS) && g_solar == Solar::Primed &&
+                      target >= 0;
+
+    if (hang) {
+        if (!blade.up || blade.target != target) {
+            if (!blade.model.TakeWeapon(NowWeapon)) {
+                return;
+            }
+
+            blade.up = true;
+            blade.grow = 0;
+            blade.target = target;
+            blade.item = held;
+            blade.yaw = RandomYaw();
+        }
+
+        blade.grow = std::min(blade.grow + 1, kJudgementGrowSteps);
+        JudgementFollow(kJudgementHover);
+    } else if (blade.up && --blade.grow <= 0) {
+        JudgementEnd();
+    }
+}
+
+bool JudgementDrop() {
+    Judgement &blade = g_judgement;
+
+    if (!blade.up || blade.falling || blade.grow < kJudgementGrowSteps / 2 || !ActiveMonster(blade.target)) {
+        return false;
+    }
+
+    blade.falling = true;
+    blade.speed = 0.0f;
+    blade.grow = kJudgementGrowSteps;
+    return true;
+}
+
+void JudgementDraw() {
+    Judgement &blade = g_judgement;
+
+    if (!blade.up || UserStatus == nullptr || UserStatus->cur_chara != CHARA_TOAN || !blade.model.Valid()) {
+        return;
+    }
+
+    // Point-down, so the grip sits the blade's length above the tip.
+    const float scale = kJudgementScale * static_cast<float>(blade.grow) / kJudgementGrowSteps;
+    const float grip_y = blade.tip_y + blade.model.tip * scale;
+    blade.model.Draw(blade.x, grip_y, blade.z, scale, blade.yaw, true);
+}
 
 /**
  * Master Utan's boulder (gedit/s96/chara/iwa.chr), loaded the first time the Terra Sword primes
@@ -2884,9 +3265,24 @@ constexpr int   kRockLifeSteps = 20 * kStepsPerSecond;
 constexpr int   kRockGoneSteps = kStepsPerSecond / 2;
 constexpr float kRockWhp = 10.0f;
 
+// How they look: the spear's guard charge tints it light blue and the Dark Genie's small beam
+// stands with it (its rise, its loop, its vanish); the Cactus comes up in a puff of smoke; the
+// Terra Sword glows green while primed, its target darkens as the boulder falls, and the landing
+// sends out the bombs' shockwave.
+constexpr float kBabelTint[3] = {80.0f, 150.0f, 230.0f};
+constexpr int   kBeamRise = 0;
+constexpr int   kBeamStand = 1;
+constexpr int   kBeamVanish = 2;
+constexpr float kBeamScale = 1.0f;
+constexpr float kTerraTint[3] = {60.0f, 170.0f, 40.0f};
+constexpr float kTargetShade[3] = {-70.0f, -70.0f, -70.0f};
+constexpr float kShockRadius = 60.0f;
+constexpr float kShockSteps = 30.0f;
+
 Column g_babel{ColumnKind::Spear};
 Column g_cactus{ColumnKind::Cactus};
 Column g_rock{ColumnKind::Rock};
+int    g_babel_beam = -1;
 int    g_column_guard = 0;     // steps the guard has been held
 bool   g_column_cast = false;  // this guard has raised something already
 bool   g_rock_primed = false;
@@ -2958,6 +3354,11 @@ bool ColumnSolid(const Column &column) {
 }
 
 void ColumnEnd(Column &column) {
+    if (&column == &g_babel) {
+        fx::End(g_babel_beam);
+        g_babel_beam = -1;
+    }
+
     column.up = false;
     column.model.root = nullptr;
     column.target = -1;
@@ -3045,6 +3446,12 @@ void RaiseBabel(int held) {
 
     RaiseCopy(column, held, kBabelScale, kBabelRadius, kBabelLifeSteps, kBabelGoneSteps);
     setUnitAmbientAnime(15.0f, 1.0f, 12.0f, 50.0f, 84.0f);
+
+    if (column.up) {
+        const float at[4] = {column.x, column.ground, column.z, 1.0f};
+        fx::End(g_babel_beam);
+        g_babel_beam = fx::Play(fx::Prop::Beam, kBeamRise, at, kBeamScale, 0.0f);
+    }
 }
 
 void RaiseCactus(int held) {
@@ -3052,6 +3459,11 @@ void RaiseCactus(int held) {
     Ahead(kCactusAhead, column.x, column.z);
     column.ground = CharaMain.pos[1];
     RaiseCopy(column, held, kCactusScale, kCactusRadius, kCactusLifeSteps, kCactusGoneSteps);
+
+    if (column.up) {
+        const float at[4] = {column.x, column.ground, column.z, 1.0f};
+        fx::Play(fx::Prop::Smoke, 0, at, kSmokeScale, CharaMain.rotation.y, false, kSmokeRate);
+    }
 }
 
 void DropRock(int target, int held) {
@@ -3146,6 +3558,20 @@ void BabelStep() {
         Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + kBabelExposed * column.scale);
     }
 
+    // The beam rises with it, stands looping while it stands, and vanishes as it sinks.
+    const float at[4] = {column.x, column.ground, column.z, 1.0f};
+
+    if (column.age == kBabelRiseSteps) {
+        if (fx::Live(g_babel_beam)) {
+            fx::Clip(g_babel_beam, kBeamStand, true);
+        } else {
+            g_babel_beam = fx::Play(fx::Prop::Beam, kBeamStand, at, kBeamScale, 0.0f, true);
+        }
+    } else if (column.age == column.life + 1) {
+        fx::Clip(g_babel_beam, kBeamVanish, false);
+    }
+
+    fx::Move(g_babel_beam, at);
     BabelConfusion();
 }
 
@@ -3176,6 +3602,10 @@ void RockStep() {
             column.ground = at[1];
         }
 
+        if (column.target >= 0 && ActiveMonster(column.target)) {
+            fx::MonsterTint(column.target, kTargetShade, 2);
+        }
+
         column.fall_speed += kRockGravity;
         column.fall_y -= column.fall_speed;
         const float dropped = column.ground + kRockDrop - column.fall_y;
@@ -3198,6 +3628,23 @@ void RockStep() {
 
         DrainWhp(column.weapon_item, kRockWhp);
         setUnitAmbientAnime(15.0f, 1.0f, 80.0f, 150.0f, 20.0f);
+
+        // The bombs' shockwave rings out from where it lands.
+        if (CShockWave *wave = NowShockWave) {
+            wave->position[0] = column.x;
+            wave->position[1] = column.ground;
+            wave->position[2] = column.z;
+            wave->position[3] = 1.0f;
+            wave->base_radius = kShockRadius;
+            wave->expand_radius = kShockRadius;
+            wave->radius = 0.0f;
+            wave->expand_steps = kShockSteps;
+            wave->phase = 0.0f;
+            wave->alpha = 0.0f;
+            wave->active = 1;
+        }
+
+        SndSePlay(SE_GORO_SMASH, -1, 0);
         return;
     }
 
@@ -3251,6 +3698,23 @@ void ColumnsStep() {
             g_rock_primed = RockModel() != nullptr;
             setUnitAmbientAnime(15.0f, 1.0f, 80.0f, 150.0f, 20.0f);
         }
+    }
+
+    // The guard's charge tints the spear and the sword; primed, the Terra Sword stays green.
+    if (ungaga_out && BtActStatus.guard_mode == kGuarding && !g_column_cast) {
+        float tint[3];
+
+        if (held == ITEM_WEAPON_BABEL_S_SPEAR && !g_babel.up) {
+            Scaled(kBabelTint, static_cast<float>(g_column_guard) / kBabelGuardSteps, tint);
+            fx::WeaponTint(tint);
+        } else if (held == ITEM_WEAPON_TERRA_SWORD && !g_rock.up) {
+            Scaled(kTerraTint, static_cast<float>(g_column_guard) / kRockGuardSteps, tint);
+            fx::WeaponTint(tint);
+        }
+    }
+
+    if (g_rock_primed && held == ITEM_WEAPON_TERRA_SWORD) {
+        fx::WeaponTint(kTerraTint);
     }
 
     // Primed, the boulder waits for a lock-on.
@@ -3349,9 +3813,9 @@ bool ColumnBlocksMonster(int m) {
 // her, turned to the nearest enemy shot coming at her, else the nearest enemy. A shot that reaches
 // it, or her, is caught and fired back from it at the nearest enemy, with the weapon's attack and
 // the shot's own element and ailments. Enemy blows that land on it wear it down: the fifth breaks
-// it, and it cannot stand again for four seconds. Left out against Expanded: enemies walking to
-// it and swinging at it in place of her, its health on the attack gauge, its own draw-and-shoot
-// animation, the fade in and out, and the break sound.
+// it, with the weapon-break sound, and it cannot stand again for four seconds. Enemies near it
+// go for it in place of her. It grows in as it stands and shrinks away as it goes. Left out
+// against Expanded: its health on the attack gauge and its own draw-and-shoot animation.
 constexpr float kShieldScale = 2.0f;
 constexpr float kShieldAhead = 12.0f;
 constexpr float kShieldHeight = 7.5f;
@@ -3362,6 +3826,8 @@ constexpr int   kShieldHits = 5;
 constexpr int   kShieldCooldown = 4 * kStepsPerSecond;
 constexpr int   kShieldHitGap = kStepsPerSecond / 2;  // one enemy's blow counts once in this
 constexpr int   kReflectGap = kStepsPerSecond / 4;    // between two shots it fires back
+constexpr float kShieldLure = 60.0f;       // enemies this near it go for it
+constexpr int   kShieldGrowSteps = 10;
 
 alignas(64) u_char g_reflect_frames[1024 * 1024];
 BorrowedShot       g_reflect(g_reflect_frames, sizeof(g_reflect_frames));
@@ -3379,6 +3845,8 @@ int                     g_shield_broken = 0;   // steps left before it may stand
 std::array<int, 16>     g_shield_hit_at{};
 std::vector<CaughtShot> g_caught;
 int                     g_reflect_ready = 0;
+int                     g_shield_grow = 0;     // 0 to kShieldGrowSteps: how far it has grown in
+float                   g_shield_last[4] = {}; // where it stood, while it shrinks away
 
 bool ReflectorHeld() {
     return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && EffectOf(CHARA_XIAO) == ITEM_WEAPON_ANGE_GEAR;
@@ -3393,6 +3861,7 @@ void ShieldReset() {
     g_caught.clear();
     g_reflect_ready = 0;
     g_reflect.Drop();
+    g_shield_grow = 0;
 }
 
 float FlatDistance(const float *a, const float *b) {
@@ -3431,13 +3900,21 @@ void ReflectorStep() {
         g_shield_broken--;
     }
 
+    if (g_shield_up) {
+        g_shield_grow = std::min(g_shield_grow + 1, kShieldGrowSteps);
+        sceVu0CopyVector(g_shield_last, g_shield_pos);
+    } else if (g_shield_grow > 0) {
+        g_shield_grow--;
+    }
+
     const bool guarding = ReflectorHeld() && BtActStatus.guard_mode == kGuarding && g_shield_broken == 0;
 
     if (!guarding) {
         g_shield_up = false;
-        g_shield_model.root = nullptr;
 
         if (!ReflectorHeld()) {
+            g_shield_model.root = nullptr;
+            g_shield_grow = 0;
             g_caught.clear();
         }
     } else {
@@ -3445,6 +3922,7 @@ void ReflectorStep() {
             g_shield_up = g_shield_model.TakeWeapon(NowWeapon);
             g_shield_model.weapon = true;
             g_shield_hits = 0;
+            g_shield_grow = 0;
         }
 
         // Turned to the nearest shot coming at her, else the nearest enemy, else ahead.
@@ -3569,19 +4047,42 @@ void ShieldBlow(int attacker, const float *at, float radius) {
 
     if (++g_shield_hits >= kShieldHits) {
         g_shield_up = false;
+        g_shield_grow = 0;
         g_shield_model.root = nullptr;
         g_shield_broken = kShieldCooldown;
         setUnitAmbientAnime(15.0f, 1.0f, 255.0f, 255.0f, 255.0f);
+        SndSePlay(SE_WEAPON_BREAK, -1, 0);
     }
 }
 
 void ShieldDraw() {
-    if (!g_shield_up || !ReflectorHeld()) {
+    if (g_shield_grow <= 0 || !ReflectorHeld() || !g_shield_model.Valid()) {
         return;
     }
 
-    g_shield_model.Draw(g_shield_pos[0], g_shield_pos[1] - g_shield_model.tip * kShieldScale * 0.5f, g_shield_pos[2], kShieldScale,
-                        g_shield_yaw);
+    const float  scale = kShieldScale * static_cast<float>(g_shield_grow) / kShieldGrowSteps;
+    const float *at = g_shield_up ? g_shield_pos : g_shield_last;
+    g_shield_model.Draw(at[0], at[1] - g_shield_model.tip * scale * 0.5f, at[2], scale, g_shield_yaw);
+}
+
+/**
+ * Whether monster m goes for the standing slingshot in place of Xiao, and where it is.
+ */
+bool ShieldPulls(int m, float *target) {
+    if (!g_shield_up || !ReflectorHeld() || !ActiveMonster(m) || NowMonstorUnit->monster[m].kind == MONSTER_KIND_NO_LOCK_ON) {
+        return false;
+    }
+
+    float at[4];
+    MonsterPosition(m, at);
+
+    if (FlatDistance(at, g_shield_pos) > kShieldLure) {
+        return false;
+    }
+
+    sceVu0CopyVector(target, g_shield_pos);
+    target[1] = CharaMain.pos[1];
+    return true;
 }
 // ── Floor cleared ───────────────────────────────────────────────────────────────────────────
 
@@ -4621,6 +5122,8 @@ float ToanHitSphere(float *hit_pos, float radius) {
 
 // ── Every step on a floor ───────────────────────────────────────────────────────────────────
 
+void GraceStep();
+
 void DungeonStep() {
     if (UserStatus == nullptr) {
         return;
@@ -4650,6 +5153,7 @@ void DungeonStep() {
 
     TyphoonStep(held);
     SolarStep(held);
+    JudgementStep(held);
     ZeusStep(held);
     MirageStep();
     HerculesStep(HeldBy(CHARA_UNGAGA));
@@ -4677,6 +5181,8 @@ void DungeonStep() {
     TunaStep();
     PockleStep();
     CatStep();
+    GraceStep();
+    fx::Step(); // Dark Cloud Expanded: the effects' models, light and tints.
 }
 
 void SpringStep(bool in_spring) {
@@ -5094,6 +5600,11 @@ bool MonsterTarget(int monster_no, float *target) {
         return true;
     }
 
+    // Angel Gear: enemies near the standing slingshot go for it.
+    if (!Confused(monster_no) && ShieldPulls(monster_no, target)) {
+        return true;
+    }
+
     const int victim = Confused(monster_no) ? ConfusedTarget(monster_no) : Provoker(monster_no);
 
     if (victim < 0) {
@@ -5106,9 +5617,12 @@ bool MonsterTarget(int monster_no, float *target) {
     return true;
 }
 
-void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
-    ShieldBlow(attacker, at, radius);
+namespace {
 
+/**
+ * A confused or provoked enemy's blow or shot at at: planted for the enemies too.
+ */
+void PlantFriendlyBlow(int attacker, const float *at, float radius, int damage) {
     if (NowMonstorUnit == nullptr || NowColData == nullptr || damage <= 0 || !Attacks(attacker)) {
         return;
     }
@@ -5136,6 +5650,69 @@ void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
     NowColData->hit[hit].weapon_flags = 0;
     g_friendly[g_friendly_next] = {hit, attacker, g_step_count};
     g_friendly_next = (g_friendly_next + 1) % static_cast<int>(g_friendly.size());
+}
+
+// The game's explosion shots: the pumpkin bomb and the three self-destructs' blasts.
+constexpr int kExplosionShots[] = {3, 16, 17, 18};
+
+bool ExplosionImmune() {
+    return UserStatus != nullptr && ActiveEffect() == ITEM_WEAPON_BIG_BANG;
+}
+
+} // namespace
+
+void OnMonsterAttack(int attacker, const float *at, float radius, int damage) {
+    ShieldBlow(attacker, at, radius);
+    PlantFriendlyBlow(attacker, at, radius, damage);
+}
+
+void OnMonsterShot(int attacker, int target, const float *at, float radius, int damage) {
+    if (target == kPlayerTarget || attacker < 0 || attacker >= 16 || radius <= 0.0f) {
+        return;
+    }
+
+    PlantFriendlyBlow(attacker, at, radius, damage);
+}
+
+bool ShotBlocked(const float *position, int target) {
+    if (target == kPlayerTarget || UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+        return false;
+    }
+
+    for (const Column *column : {&g_babel, &g_cactus}) {
+        if (!ColumnSolid(*column)) {
+            continue;
+        }
+
+        const float exposed = column == &g_babel ? kBabelExposed : kCactusExposed;
+        const float top = column->ground + exposed * column->scale;
+        const float dx = position[0] - column->x;
+        const float dz = position[2] - column->z;
+
+        if (dx * dx + dz * dz <= column->radius * column->radius && position[1] <= top && position[1] >= column->ground - 4.0f) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool ShotSparesPlayer(const BT_SHOT_EFFECT *shot) {
+    if (shot == nullptr || shot->target == kPlayerTarget || !ExplosionImmune()) {
+        return false;
+    }
+
+    for (const int index : kExplosionShots) {
+        if (shot == BtEntryEffectTbl[index]) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool BombSparesPlayer(int target) {
+    return target != kPlayerTarget && ExplosionImmune();
 }
 
 bool SparesPlayer(int monster_no) {
@@ -5395,6 +5972,18 @@ bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage)
         return true;
     }
 
+    // Super Steve with a Sun Sword, Big Bang or Sword of Zeus sphere: a charged shot carries the
+    // sword's move to what it hits.
+    if (charged && (held == ITEM_WEAPON_SUN_SWORD || held == ITEM_WEAPON_BIG_BANG || held == ITEM_WEAPON_SWORD_OF_ZEUS)) {
+        const int slot = SpawnPellet(shots, world, vector, strong, 1.0f);
+
+        if (slot >= 0) {
+            g_pellets[slot].sword = held;
+        }
+
+        return true;
+    }
+
     // Double Impact: two pellets side by side across the flight line.
     if (held == ITEM_WEAPON_DOUBLE_IMPACT) {
         const int twin = std::max(1, static_cast<int>(std::lround(static_cast<float>(damage) * kTwinDamage)));
@@ -5454,6 +6043,39 @@ bool PelletDeparts(CSHOT *shots, int slot) {
     return true;
 }
 
+namespace {
+
+/**
+ * Super Steve's charged pellet lands with a sword's move: the Sun Sword's Solar Shot blinds the
+ * room, Big Bang's Detonate blasts where it hits, the Sword of Zeus's Lightning strikes the enemy
+ * it hits. Each costs what the sword's own move does.
+ */
+void SwordShotHit(int sword, const float *pos) {
+    const float at[4] = {pos[0], pos[1], pos[2], 1.0f};
+
+    if (sword == ITEM_WEAPON_SUN_SWORD) {
+        SolarBlind();
+        DrainWhp(ITEM_WEAPON_SUN_SWORD, kSolarWhp);
+    } else if (sword == ITEM_WEAPON_BIG_BANG) {
+        PlantBlast(at, 1.0f, true);
+        Burst(at, kDetonateScale);
+        DrainWhp(ITEM_WEAPON_BIG_BANG, kDetonateWhp);
+    } else if (sword == ITEM_WEAPON_SWORD_OF_ZEUS) {
+        const int hit = MonsterAt(at, kPelletRadius * 2.0f, -1);
+
+        if (hit >= 0) {
+            BoltOn(hit);
+        } else {
+            PlantBlast(at, kBoltDamage, true);
+            BoltSeen(at);
+        }
+
+        DrainWhp(ITEM_WEAPON_SWORD_OF_ZEUS, kBoltWhp);
+    }
+}
+
+} // namespace
+
 void OnPelletHit(CSHOT *shots, int slot, bool monster) {
     const Pellet pellet = g_pellets[slot];
     const float *pos = shots->pos[slot];
@@ -5474,6 +6096,10 @@ void OnPelletHit(CSHOT *shots, int slot, bool monster) {
 
     if (pellet.crush) {
         g_crush_hits[slot] = {NowColData->now_hit, shots->damage[slot], g_step_count};
+    }
+
+    if (monster && pellet.sword >= 0) {
+        SwordShotHit(pellet.sword, pos);
     }
 
     // Ricochet: the Hardshooter's pellets, and Double Impact's, send a second pellet on from
@@ -5594,6 +6220,11 @@ void OnToanWhirl(CSHOT_EFFECT *effect, int slot) {
         g_mobius_radius[slot] = kOutOfReach;
         PlantBlast(CharaMain.pos, 1.0f, true);
         DrainWhp(ITEM_WEAPON_BIG_BANG, kDetonateWhp);
+
+        // The blast is seen as the game's bomb blast in place of the whirlwind.
+        constexpr float kHidden = 0.001f;
+        SetSlotScale(effect, slot, kHidden);
+        Burst(CharaMain.pos, kExplosionScale);
     }
 }
 
@@ -5608,6 +6239,11 @@ void UngagaStrike(const float *tip) {
     }
 
     g_wrath = Wrath::Idle;
+
+    // The blast's sparkle and a gold flash where it lands.
+    const float *at = DecoyUp() ? g_mirage_lure.pos : tip;
+    fx::Play(fx::Prop::Sparkle, kSparkleSwirl, at, 1.0f, 0.0f);
+    fx::Flash(kHerculesLight, kHerculesLight, kHerculesFlashSteps);
 
     if (DecoyUp()) {
         PlantBlast(g_mirage_lure.pos, 1.0f, true, -1, kHerculesReach);
@@ -5995,27 +6631,33 @@ bool GuardianGrace() {
     const int held = EffectOf(CHARA_XIAO);
 
     return (held == ITEM_WEAPON_ANGEL_SHOOTER || held == ITEM_WEAPON_ANGE_GEAR) && BtActStatus.guard_mode == kGuarding &&
-           (NowWeaponHave->flags & 0x800) != 0;
+           NowWeaponHave != nullptr && (NowWeaponHave->flags & 0x800) != 0;
+}
+
+void GraceStep() {
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || !GuardianGrace()) {
+        g_grace_glow = 0.0f;
+        return;
+    }
+
+    float tint[3];
+    Scaled(kGraceGlow, (0.6f + 0.4f * g_grace_glow) * Pulse(), tint);
+    fx::PlayerTint(tint);
+    g_grace_glow = std::max(0.0f, g_grace_glow - kGraceGlowFade);
 }
 
 int HealCounter(int counter, int threshold) {
     // The Heal tick comes every second while she guards, the game's own 1 HP each time.
     constexpr int kGraceFrames = 60;
-    static bool   was_guarding = false;
 
     const bool grace = GuardianGrace();
-
-    if (grace && !was_guarding) {
-        setUnitAmbientAnime(30.0f, 1.0f, 110.0f, 110.0f, 110.0f);
-    }
-
-    was_guarding = grace;
     return grace ? std::max(counter, threshold - kGraceFrames) : counter;
 }
 
 void OnHealTick() {
+    // Each heal brightens the glow a moment.
     if (GuardianGrace()) {
-        setUnitAmbientAnime(60.0f, 1.0f, 70.0f, 70.0f, 70.0f);
+        g_grace_glow = 1.0f;
     }
 }
 
@@ -6186,6 +6828,8 @@ void OnFloorStart() {
     MirageReset();
     ColumnsReset();
     ShieldReset();
+    JudgementEnd();
+    fx::Reset(); // Dark Cloud Expanded: the effects' models, light and tints.
     quest::EnhancedFloorStart();
 }
 
@@ -6203,6 +6847,7 @@ void DecoyDraw(const float *scene_ambient) {
 
 void ColumnDraw() {
     ColumnsDraw();
+    JudgementDraw(); // Dark Cloud Expanded: Big Bang's and the Sword of Zeus's judgement blade.
     ShieldDraw();
     CatDraw(); // Dark Cloud Expanded: the Divine Beast Title's cat.
 }

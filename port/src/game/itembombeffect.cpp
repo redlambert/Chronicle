@@ -7,6 +7,7 @@
 #include "camera.hpp"
 #include "collisiondata.hpp"
 #include "dun/gameloop.hpp"
+#include "expanded_weapons.hpp"
 #include "itemdata.hpp"
 #include "mglib.hpp"
 #include "rect.hpp"
@@ -117,7 +118,8 @@ int SetBombEffect(float *position, int owner, int damage, float scale) {
 
         NowBombEffect[bomb].SetBomb(position, scale);
         SndSePlay(SE_EXPLOSION, -1, 0);
-        const int collision_slot = NowColData->Set(position, damage, static_cast<int>(45.0f * scale), 20.0f * scale, 0.0f, owner, 3, 0, 0);
+        // Dark Cloud Expanded: Big Bang's wielder shrugs off the game's explosions.
+        const int collision_slot = expanded::BombSparesPlayer(owner) ? -1 : NowColData->Set(position, damage, static_cast<int>(45.0f * scale), 20.0f * scale, 0.0f, owner, 3, 0, 0);
 
         if (collision_slot != -1) {
             CCollisionData *collision = NowColData;
