@@ -82,6 +82,143 @@ void SavePackConfigs(const std::string &stem, u_int *pack) {
     }
 }
 
+// ── One-time copy of game files for the next ports (temporary) ─────────────────────────────────
+
+// True when path matches pattern, where '*' stands for any run of characters inside one folder
+// name (it never crosses a '/'). Both are folded game paths.
+bool PathMatches(std::string_view pattern, std::string_view path) {
+    if (pattern.empty()) {
+        return path.empty();
+    }
+    if (pattern.front() == '*') {
+        for (size_t skip = 0; skip <= path.size(); skip++) {
+            if (PathMatches(pattern.substr(1), path.substr(skip))) {
+                return true;
+            }
+            if (skip < path.size() && path[skip] == '/') {
+                break;
+            }
+        }
+        return false;
+    }
+    if (path.empty() || pattern.front() != path.front()) {
+        return false;
+    }
+    return PathMatches(pattern.substr(1), path.substr(1));
+}
+
+// Dark Cloud Expanded's missing weapon effects and map changes borrow these game files
+// (Weapons/, IsoPatch/ and Town/ in its source). Each is copied once into logs/files/, its folders
+// kept, so they can be read before those features are ported. logs/files.txt lists every file in
+// the game data and what was copied.
+void DumpPortFiles() {
+    static bool done = false;
+    if (done) {
+        return;
+    }
+    done = true;
+
+    constexpr std::array<const char *, 48> kPatterns = {
+        // Weapon effects
+        "dun/effect/*",
+        "gedit/s99/chara/lightning*",
+        "dun/mainchara/c04w.pac",
+        "dun/mainchara/c04b.chr",
+        "dun/mainchara/c01d.chr",
+        "dun/mainchara/c10b.chr",
+        "commenu/c04wtes.chr",
+        "commenu/weapon/*",
+        "dun/monstor/c17_beem_s.chr",
+        "dun/monstor/c12a.chr",
+        "dun/monstor/e156a.chr",
+        "dun/monstor/e50a.chr*",
+        "dun/mpd_pack/d06main_a.mpd",
+        "gedit/e03/chara/e228ex.chr",
+        "gedit/s04/chara/e114*",
+        "gedit/s86/chara/c04cat.chr",
+        "gedit/e01/chara/e04c04cat.chr",
+        "gedit/s78/chara/e508_ex.chr",
+        "gedit/s96/chara/iwa.chr",
+        "dun/item/main_data/bakudan*",
+        "commenu/*/dungeon/dunmenu*",
+        "commenu/*/quickchr.pac",
+        "commenu/*/*charatex.img",
+        "commenu/*/nameregi.pak",
+        "meswin/system*",
+        "sound/set/monlib.snd",
+        "sound/set/snd202.snd",
+        // Every script: monsters, events, the Fairy King's and the Fog Gate's
+        "*.stb",
+        "*/*.stb",
+        "*/*/*.stb",
+        "*/*/*/*.stb",
+        "*/*/*/*/*.stb",
+        // Map changes: Queens, Yellow Drops, Brownboo and the canal map
+        "gedit/e03/*",
+        "gedit/e05/*",
+        "gedit/s04/*",
+        "gedit/s13/*",
+        "gedit/s79/chara/c10a.chr",
+        "chara/c01d_turi.chr",
+        "chara/f*.chr",
+        // Moon Sea's floors (Samba's fountains) and the font (the heart symbol)
+        "dun/mpd_pack/d05*",
+        "dun/d05/*",
+        "*font*",
+        "*/*font*",
+        "*/*/*font*",
+        "*/*/*/*font*",
+        "*/*/*/*/*font*",
+        "*.fnt",
+        "*/*.fnt",
+    };
+    constexpr std::uintmax_t kLargestFile = 24u * 1024 * 1024;
+    constexpr std::uintmax_t kLargestTotal = 400u * 1024 * 1024;
+
+    std::vector<std::string> files = dc::data::DataReadListFiles();
+    std::ranges::sort(files);
+
+    const fs::path root = LogDir() / "files";
+    std::ofstream  list(LogDir() / "files.txt", std::ios::trunc);
+    std::uintmax_t total = 0;
+    int            copied = 0;
+
+    for (const std::string &path : files) {
+        const std::uintmax_t size = dc::data::DataFileSize(path);
+        list << path << ' ' << size;
+
+        const bool wanted = std::ranges::any_of(kPatterns, [&](const char *pattern) {
+            return PathMatches(pattern, path);
+        });
+        if (!wanted) {
+            list << '\n';
+            continue;
+        }
+        if (size > kLargestFile || total + size > kLargestTotal) {
+            list << " (wanted, too big to copy)\n";
+            continue;
+        }
+
+        std::vector<std::uint8_t> bytes;
+        if (!dc::data::DataReadReadFile(path, bytes)) {
+            list << " (wanted, could not be read)\n";
+            continue;
+        }
+
+        std::error_code error;
+        const fs::path  out = root / path;
+        fs::create_directories(out.parent_path(), error);
+        std::ofstream file(out, std::ios::binary | std::ios::trunc);
+        file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        list << " (copied)\n";
+        total += bytes.size();
+        copied++;
+    }
+
+    list << std::format("{} of {} files copied, {} bytes\n", copied, files.size(), total);
+    std::println("[Dump] {} files copied to logs/files ({} bytes)", copied, total);
+}
+
 // ── Walking the town as an ally ────────────────────────────────────────────────────────────────
 
 // The model each character walks the town in, as Enhanced loads them: the allies' own story
@@ -224,6 +361,8 @@ void TownAllySelect(int chara) {
 }
 
 void TownAllyMapLoaded() {
+    // Dark Cloud Expanded: copies the game files the next ports need, once (see DumpPortFiles).
+    DumpPortFiles();
     TownLadderCancel();
     g_ally = 0;
     g_pending = -1;

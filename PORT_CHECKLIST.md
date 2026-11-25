@@ -15,7 +15,8 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 7. Expanded zip 2, dungeons and enemies: miniboss scaling and loot tables, more than five shot types per floor, Ungaga's doors for the whole party, harder enemy AI option (all in, untested)
 8. Expanded zip 3, fishing and quests: casting and line fixes, bobber camera, fish steering, size changes, Mardan rework and records, Pike/Pao/Sam/Devia tracking, Mint's 17-fish quest, quest tracker, Hello starts quests, Fairy King fix (all in, untested)
 9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run (all in, untested)
-10. Last, if at all (lowest priority): the map changes. New fishing spots, Queens canal tide, Yellow Drops west bank, Queens snake statue, Brownboo cleanup, Brownboo pond rocks, town camera collision
+10. Expanded zip 5, the missing weapon effects: every visual left out of the weapon rows (dimming, tints, glows, smoke, lightning, judgement blade, explosion, Dark Genie beam, the cat's wings and cape, the Reflector's animation and fades), the gameplay pieces with them (Big Bang's explosion immunity, Cactus and Babel's Spear blocking shots, enemies attacking the Reflector, Confuse's stars, icon and projectile friendly fire, Super Steve's Xiao shot versions of Toan's moves), plus attack voices only, the stuck-landing fix and Toan's name swapped in the ally lines. Waiting on the file dump (chronicle-file-dump.zip copies them to logs/files/)
+11. Then the map changes. New fishing spots, Queens canal tide, Yellow Drops west bank, Queens snake statue, Brownboo cleanup, Brownboo pond rocks, town camera collision
 
 ## How to read this
 
