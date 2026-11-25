@@ -68,6 +68,26 @@ float TownEyeHeight();
 void TownCharaPackLoaded(const char *path, u_int *pack);
 
 /**
+ * Dark Cloud Expanded: the pack EdLoadMainChara should read for the character file at path. For
+ * an ally whose town moveset was built (town_moveset.hpp), that is the built pack; for anything
+ * else it is pack itself, the file as read.
+ */
+u_int *TownCharaPack(const char *path, u_int *pack);
+
+/**
+ * Dark Cloud Expanded: whether the ally walking the town has their moveset, so their ladder moves
+ * (town_ladder.hpp) can play.
+ */
+bool TownAllyHasMoveset();
+
+/**
+ * Dark Cloud Expanded (Town/TownIdleSit.cs): the motion EdMoveChara should play for the walking
+ * character, given the idle, walk or run it picked. Xiao, with her moveset, sits after 1.5 seconds
+ * of standing still; any move stands her straight back up.
+ */
+int TownIdleMotion(int motion);
+
+/**
  * The ally's line for the villager the player talks to, or nullptr when Toan walks or the
  * villager has none. Each call turns the villager to its other line for next time.
  */

@@ -161,6 +161,13 @@ bool DataReadLoadFile(std::string_view path, void *buffer, int *size);
 bool DataReadPackCapacity(const void *pack, std::size_t &capacity);
 
 /**
+ * Dark Cloud Expanded: tracks a pack built in memory (an ally's town model with its movesets
+ * added) as a loaded pack of capacity bytes, so its members can be looked up as a read file's are.
+ * logical_path names the data file it was built from.
+ */
+void DataReadTrackBuiltPack(const void *pack, std::size_t capacity, std::string_view logical_path);
+
+/**
  * Tracks a pack member's bytes as a nested range of the loaded pack: entry_offset is the member's
  * offset in the pack, entry_size its size there, and size the size of the bytes at data (which a
  * localized message file may change). duplicate_name tags the member with its index.

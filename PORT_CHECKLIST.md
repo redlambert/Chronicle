@@ -1,6 +1,6 @@
 # Dark Cloud Expanded → Chronicle port checklist
 
-Expanded adds up to 172 features. 94 are done, 41 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 10 are to do.
+Expanded adds up to 172 features. 95 are done, 42 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 8 are to do.
 
 ## Order of work
 
@@ -14,7 +14,7 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 6. Expanded zip 1, weapons: built in chronicle-expanded-weapons-1.zip (Babel's Spear, Terra Sword, Cactus Desert Bloom, Angel Gear party heal and Guardian Reflector, Chronicle 2, their menu descriptions). Zip 1b built in chronicle-expanded-weapons-1b.zip (Pockle Call, Spirit Beast, Super Steve's Sphere Inheritance, the last menu descriptions)
 7. Expanded zip 2, dungeons and enemies: miniboss scaling and loot tables, more than five shot types per floor, Ungaga's doors for the whole party, harder enemy AI option (all in, untested)
 8. Expanded zip 3, fishing and quests: casting and line fixes, bobber camera, fish steering, size changes, Mardan rework and records, Pike/Pao/Sam/Devia tracking, Mint's 17-fish quest, quest tracker, Hello starts quests, Fairy King fix (all in, untested)
-9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run (switch sequence, fishing and overhead camera in, untested; animation sets and ladder climbs still to do)
+9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run (all in, untested)
 10. Last, if at all (lowest priority): the map changes. New fishing spots, Queens canal tide, Yellow Drops west bank, Queens snake statue, Brownboo cleanup, Brownboo pond rocks, town camera collision
 
 ## How to read this
@@ -218,14 +218,14 @@ Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, 
 
 ## Towns, allies and camera
 
-Playing as allies in town is in; the allies' animation sets and ladder climbs are the big pieces left, with the map work.
+Playing as allies in town is in, with their full animation sets and ladder moves; what's left is the map work.
 
 | Feature | From | Status | Notes |
 | --- | --- | --- | --- |
 | Play as any ally in town, swapped in place | Both | Done, partial | Untested. Town party menu: pick any ally in the party and they take over once you leave the menu (pick Toan to switch back). Uses Enhanced's models (the allies' cutscene models) and its Xiao and Ruby motion fixes; Xiao's first-person camera sits lower. Toan comes back for every cutscene and on every new map. Event points are off for allies in maps 11, 13, 14, 33, 35 and 37, as in Enhanced. Left out: Xiao's lower talk camera, the stuck-landing fix |
 | Party menu commit plays the dungeon's switch sequence | Expanded | Done | Untested. Picking a different character in the town party menu: the confirm chime, the portraits spread off-screen, the menu closes itself and the ally takes over. Picking the one already walking closes the page as before; an ally not in the party yet gets the reject beep |
-| Full town animation sets for all five allies | Expanded | To do | Hard; needs the ally row |
-| Each ally climbs ladders their own way | Expanded | To do | Hard; needs the ally row |
+| Full town animation sets for all five allies | Expanded | Done | Untested. Expanded's town models, rebuilt the same way from your game data the first time each ally is picked: every clip it copies between each ally's models (run, doors, item get, refusal, fall, land and the ladder clips), its held, moved, reversed and frozen windows, Ruby's added shadow and Osmond's helicopter backpack with its spin. Checked against your own files: all five build, with every joint matched but a few per clip. Ungaga now walks in Expanded's model (the one with his cloth). Xiao sits down after standing still 1.5 s. Works differently: built in memory instead of patched into the disc image. If a build fails, logs/town.txt says why and that ally walks as before |
+| Each ally climbs ladders their own way | Expanded | Done, partial | Untested. Cross at a ladder: Xiao walks up, backs off, crouches and leaps over (down: hops off), landing on her own; Goro climbs in four hops and jumps down after a gathering crouch; Ruby floats up or down; Osmond flies up on his helicopter backpack and dives down; Ungaga refuses at both ends. Toan's ladder camera during the move. Works differently: played by the port's own step player instead of Expanded's generated town scripts, so the camera's hand-back is close but may not match exactly. Console logs "[Ladder]" for each move |
 | Allies can fish | Expanded | Done | Untested. The fishing session runs as Toan (it loads Toan's fishing model, as in Expanded), and the ally comes back once you're walking again. town.txt in logs/ notes each return |
 | Town camera collision overhaul | Expanded | To do | Hard |
 | Queens snake statue is climbable | Expanded | To do |  |

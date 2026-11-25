@@ -45,6 +45,7 @@
 #include "snd.hpp"
 #include "sysmes.hpp"
 #include "texture.hpp"
+#include "town_ladder.hpp"
 #include "quest/enhanced.hpp"
 #include "enhanced_town.hpp"
 
@@ -1404,6 +1405,14 @@ void EdMoveChara() {
         chara_mode &= ~1;
     }
 
+    // Dark Cloud Expanded: while an ally's ladder move plays, it places the character and the camera.
+    if (expanded::TownLadderStep(chara, camera)) {
+        chara->Step();
+        chara->ShadowStep();
+        chara->ClothStep(0);
+        return;
+    }
+
     sceVu0FVECTOR pos;
     sceVu0FVECTOR rot;
     chara->GetPosition(pos);
@@ -1505,6 +1514,11 @@ void EdMoveChara() {
     }
 
     if ((chara_mode & 6) == 0 && chara_fishing < ED_FISHING_CAST_START) {
+        // Dark Cloud Expanded: Xiao sits down after standing still a moment.
+        if (EdMoveCharaInfo.fishing == 0) {
+            motion = expanded::TownIdleMotion(motion);
+        }
+
         chara->SetMotion(motion, 0);
         chara->SetMotionSpeed(motion_speed);
     }
@@ -2044,8 +2058,12 @@ void EdMoveChara() {
                 EdEventInfo.draw_exclamation_mark = true;
 
                 if (PadDown(0x40) != 0 && (interior != 0 || viewMode == 0)) {
-                    EdInitHashigo(&EdEventInfo, param);
-                    system_event_no = 1;
+                    // Dark Cloud Expanded: an ally takes the ladder their own way; Toan's climb is
+                    // rigged for him alone.
+                    if (!expanded::TownAllyHasMoveset() || !expanded::TownLadderStart(chara, expanded::TownAlly(), param, camera)) {
+                        EdInitHashigo(&EdEventInfo, param);
+                        system_event_no = 1;
+                    }
                 }
             }
 

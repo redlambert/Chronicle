@@ -4684,8 +4684,10 @@ void EdLoadMainChara(char *pack_path, char *info_name, CDataAlloc2<1> *arena) {
     }
 
     LoadFile(pack_path, read_buffer, nullptr);
+    // Dark Cloud Expanded: an ally's town model with their moveset built in.
+    u_int *pack = expanded::TownCharaPack(pack_path, read_buffer);
     // Dark Cloud Enhanced: the allies' motion fixes, and the config logged.
-    expanded::TownCharaPackLoaded(pack_path, read_buffer);
+    expanded::TownCharaPackLoaded(pack_path, pack);
     MainChara.Initialize();
 
     for (i = 0; i < 128; i++) {
@@ -4693,7 +4695,7 @@ void EdLoadMainChara(char *pack_path, char *info_name, CDataAlloc2<1> *arena) {
     }
 
     MainChara.InitializeTexAnime(CharaTexAnimeData, 128);
-    MainChara.LoadPackData2(read_buffer, info_name, arena, 8, arena, 0);
+    MainChara.LoadPackData2(pack, info_name, arena, 8, arena, 0);
     CFrameAttr attr;
     attr.clip_enable = false;
     attr.fog_enable = true;

@@ -10,6 +10,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <print>
 #include <set>
 #include <string>
 #include <string_view>
@@ -24,6 +25,8 @@
 #include "editmapscript.hpp"
 #include "main.hpp"
 #include "platform/paths.hpp"
+#include "town_ladder.hpp"
+#include "town_moveset.hpp"
 #include "userstatus.hpp"
 
 namespace dc::game::expanded {
@@ -79,68 +82,6 @@ void SavePackConfigs(const std::string &stem, u_int *pack) {
     }
 }
 
-// Dark Cloud Expanded's ally town movesets and ladder climbs are clips taken from these models
-// (IsoPatch/TownModelBakes.cs). Each is copied once into logs/models/, its folders kept, so the
-// clips and skeletons can be read before the movesets are ported.
-void DumpTownModels() {
-    static bool done = false;
-    if (done) {
-        return;
-    }
-    done = true;
-
-    constexpr std::array<const char *, 18> kModels = {
-        "chara/c01d.chr",
-        "gedit/e01/chara/c04pcat.chr",
-        "gedit/e01/chara/e04c04cat.chr",
-        "gedit/s86/chara/c04cat.chr",
-        "dun/d01/event/e613c04cat.chr",
-        "gedit/s01/chara/c06p.chr",
-        "gedit/s01/chara/e101.chr",
-        "gedit/s01/chara/e102.chr",
-        "dun/mainchara/c06b.chr",
-        "gedit/e03/chara/c05a.chr",
-        "gedit/e03/chara/e223c05a.chr",
-        "gedit/e03/chara/e228c05a.chr",
-        "dun/mainchara/c05a.chr",
-        "gedit/e04/chara/e323_2c10a.chr",
-        "dun/mainchara/c10b.chr",
-        "gedit/e05/chara/c18p.chr",
-        "gedit/e05/chara/e403c18a.chr",
-        "gedit/s13/chara/e402c18a.chr",
-    };
-    constexpr std::uintmax_t kSector = 2048;
-
-    const fs::path root = LogDir() / "models";
-    int            copied = 0;
-
-    for (const char *model : kModels) {
-        const std::uintmax_t size = dc::data::DataFileSize(model);
-        if (size == 0) {
-            LogLine("models.txt", std::format("{}: not in the game data", model));
-            continue;
-        }
-
-        std::vector<char> buffer(static_cast<size_t>((size + kSector - 1) / kSector * kSector + kSector));
-        int               read = 0;
-        if (!dc::data::DataReadLoadFile(model, buffer.data(), &read) || read <= 0) {
-            LogLine("models.txt", std::format("{}: could not be read", model));
-            continue;
-        }
-        dc::data::DataReadForgetPackCapacities(buffer.data());
-
-        std::error_code error;
-        const fs::path  out = root / model;
-        fs::create_directories(out.parent_path(), error);
-        std::ofstream file(out, std::ios::binary | std::ios::trunc);
-        file.write(buffer.data(), std::min<std::streamsize>(read, static_cast<std::streamsize>(size)));
-        LogLine("models.txt", std::format("{}: {} bytes", model, size));
-        copied++;
-    }
-
-    LogLine("models.txt", std::format("{} of {} models copied", copied, kModels.size()));
-}
-
 // ── Walking the town as an ally ────────────────────────────────────────────────────────────────
 
 // The model each character walks the town in, as Enhanced loads them: the allies' own story
@@ -168,6 +109,57 @@ bool g_saw_fishing = false;
 // Which of its two lines each villager says next, by its place in kAllyTalk.
 std::set<int> g_second_line;
 
+// ── Dark Cloud Expanded: the allies' town movesets ─────────────────────────────────────────────
+
+// Each ally's built model (town_moveset.hpp): 0 not tried yet, 1 built, -1 failed (the Enhanced
+// model and its motion fixes are used instead).
+std::array<int, 6>            g_moveset_state{};
+std::array<moveset::Bytes, 6> g_moveset_pack;
+
+// The built pack the game reads, in storage that stays put while the ally walks.
+std::vector<u_int> g_built_pack;
+bool               g_ally_pack_built = false;
+
+// The ally LoadTownChara is loading, so only its own load gets the built pack (an event that loads
+// the same model gets the file as it is).
+int g_loading_ally = 0;
+
+bool MovesetReady(int chara) {
+    if (chara <= 0 || chara >= static_cast<int>(g_moveset_state.size())) {
+        return false;
+    }
+
+    const size_t slot = static_cast<size_t>(chara);
+
+    if (g_moveset_state[slot] != 0) {
+        return g_moveset_state[slot] > 0;
+    }
+
+    const char *base_path = moveset::BaseModel(chara);
+    moveset::Bytes base;
+    std::vector<std::string> log;
+    const moveset::Reader read = [](std::string_view path, moveset::Bytes &out) { return dc::data::DataReadReadFile(path, out); };
+
+    const bool built = base_path != nullptr && read(base_path, base) &&
+                       moveset::Build(chara, base, read, g_moveset_pack[slot], log);
+    g_moveset_state[slot] = built ? 1 : -1;
+
+    for (const std::string &line : log) {
+        LogLine("town.txt", line);
+    }
+
+    std::println("[Moveset] character {}: {}", chara, built ? "built" : "not built, see logs/town.txt");
+    return built;
+}
+
+const char *TownModel(int chara) {
+    if (MovesetReady(chara)) {
+        return moveset::BaseModel(chara);
+    }
+
+    return kTownModels[static_cast<size_t>(chara)];
+}
+
 void LoadTownChara(int chara) {
     sceVu0FVECTOR position = {0.0f, 0.0f, 0.0f, 1.0f};
     sceVu0FVECTOR rotation = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -178,12 +170,17 @@ void LoadTownChara(int chara) {
 
     CharaBuffer.used = 0;
     char info[] = "info.cfg";
-    EdLoadMainChara(const_cast<char *>(kTownModels[static_cast<size_t>(chara)]), info, &CharaBuffer);
+    // Dark Cloud Expanded: an ally walks in the model their moveset was built on.
+    TownLadderCancel();
+    const char *model = TownModel(chara);
+    g_loading_ally = chara;
+    EdLoadMainChara(const_cast<char *>(model), info, &CharaBuffer);
+    g_loading_ally = 0;
     Chara->SetPosition(position);
     Chara->SetRotation(rotation);
     g_ally = chara;
     g_second_line.clear();
-    LogLine("town.txt", std::format("map {}: now walking as character {} ({})", MapNo, chara, kTownModels[static_cast<size_t>(chara)]));
+    LogLine("town.txt", std::format("map {}: now walking as character {} ({})", MapNo, chara, model));
 }
 
 // One of Enhanced's motion fixes: a numbers field of the config ("\t22,") written over where the
@@ -227,8 +224,7 @@ void TownAllySelect(int chara) {
 }
 
 void TownAllyMapLoaded() {
-    // Dark Cloud Expanded: copies the moveset source models out once (see DumpTownModels).
-    DumpTownModels();
+    TownLadderCancel();
     g_ally = 0;
     g_pending = -1;
     g_fishing_ally = -1;
@@ -266,12 +262,64 @@ void TownAllyStep() {
 }
 
 void TownAllyEventStarted() {
+    TownLadderCancel();
     g_pending = -1;
     if (g_ally != 0 && GameMode == ED_MODE_EVENT) {
         g_fishing_ally = g_ally;
         g_saw_fishing = false;
         LoadTownChara(0);
     }
+}
+
+u_int *TownCharaPack(const char *path, u_int *pack) {
+    g_ally_pack_built = false;
+
+    if (path == nullptr || pack == nullptr) {
+        return pack;
+    }
+
+    const int chara = g_loading_ally;
+
+    if (chara > 0 && chara < static_cast<int>(g_moveset_state.size()) && g_moveset_state[static_cast<size_t>(chara)] > 0 &&
+        moveset::BaseModel(chara) != nullptr && std::string_view(path) == moveset::BaseModel(chara)) {
+        const moveset::Bytes &built = g_moveset_pack[static_cast<size_t>(chara)];
+        const size_t          capacity = (built.size() + 2047) / 2048 * 2048;
+
+        if (!g_built_pack.empty()) {
+            dc::data::DataReadForgetPackCapacities(g_built_pack.data());
+        }
+
+        g_built_pack.assign(capacity / sizeof(u_int), 0);
+        std::memcpy(g_built_pack.data(), built.data(), built.size());
+        dc::data::DataReadTrackBuiltPack(g_built_pack.data(), capacity, path);
+        g_ally_pack_built = true;
+        return g_built_pack.data();
+    }
+
+    return pack;
+}
+
+bool TownAllyHasMoveset() {
+    return g_ally != 0 && g_moveset_state[static_cast<size_t>(g_ally)] > 0;
+}
+
+int TownIdleMotion(int motion) {
+    constexpr int kSit = 6;
+    constexpr int kSitAfter = 90; // 1.5 seconds at 60 frames a second
+
+    static int still = 0;
+
+    if (g_ally != kXiao || !TownAllyHasMoveset() || motion != 0) {
+        still = 0;
+        return motion;
+    }
+
+    if (still < kSitAfter) {
+        still++;
+        return motion;
+    }
+
+    return kSit;
 }
 
 bool TownAllySkipsEventPoints() {
@@ -302,6 +350,11 @@ void TownCharaPackLoaded(const char *path, u_int *pack) {
     }
     const std::string stem = Stem(path);
     SavePackConfigs(stem, pack);
+
+    // Dark Cloud Expanded: a built moveset already has its own KEY table.
+    if (g_ally_pack_built) {
+        return;
+    }
 
     int  size = 0;
     char info[] = "info.cfg";

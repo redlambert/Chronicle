@@ -835,6 +835,11 @@ bool DataReadPackCapacity(const void *pack, std::size_t &capacity) {
     return true;
 }
 
+void DataReadTrackBuiltPack(const void *pack, std::size_t capacity, std::string_view logical_path) {
+    ForgetPackCapacities(pack);
+    TrackPackCapacity(pack, capacity, pack, logical_path, {}, 0, capacity);
+}
+
 void DataReadTrackPackMember(const void *pack, const void *data, std::size_t size, std::size_t entry_offset,
                              std::string_view entry_name, std::size_t entry_size, int index, bool duplicate_name) {
     auto found = loaded_capacities.find(pack);
