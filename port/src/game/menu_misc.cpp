@@ -473,11 +473,6 @@ int WeaponStatusBreakEnable(WEAPON_HAVE *weapon) {
         return 0;
     }
 
-    // Dark Cloud Expanded: Sevenfold Rite keeps a 7 Branch Sword whole below +7.
-    if (weapon->item_no == ITEM_WEAPON_7BRANCH_SWORD && weapon->level < expanded::kSevenfoldLevel) {
-        return 0;
-    }
-
     return weapon->level >= 5 ? 1 : 0;
 }
 
@@ -1609,15 +1604,9 @@ void WeaponOptionStatusDraw(WEAPON_HAVE *weapon, int x, int y, int alpha) {
 
             source.y = source.height * (row - 1) + 0x50;
 
-            // Dark Cloud Expanded: Confuse has no icon of its own yet, so it shows Stop's.
-            CRect_i_ tile = source;
-
-            if (bit == expanded::kConfuseAbilityBit) {
-                tile.x = 0xEC;
-                tile.y = source.height * 5 + 0x50;
-            }
-
-            DrawMenu2DSprite(texture, CRect_i_(draw_x, draw_y, 0x14, 0x15), tile, alpha);
+            // Dark Cloud Expanded: Confuse's icon is painted into the empty tile beside Steal
+            // (expanded::fx::PaintTexture), which bit 14 reads as the game lays the tiles out.
+            DrawMenu2DSprite(texture, CRect_i_(draw_x, draw_y, 0x14, 0x15), source, alpha);
             draw_x += source.width;
             count++;
 

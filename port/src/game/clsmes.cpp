@@ -1078,6 +1078,11 @@ short *ClsMes::GetTextLineDataTop(int line) {
         }
     }
 
+    // Dark Cloud Expanded: Sevenfold Rite's refused break says why it failed.
+    if (short *text = expanded::SevenfoldRefusalText(this, line)) {
+        return text;
+    }
+
     // Dark Cloud Expanded: weapon descriptions that say what the new effects do.
     if (short *text = expanded::MenuDescription(this, this->buff, line)) {
         return text;

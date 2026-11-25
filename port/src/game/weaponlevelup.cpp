@@ -37,6 +37,10 @@ CMenuItemStep ItemVolumeStep;
 namespace {
 
 /** Effect file each WepEffectKind loads, indexing the name tables below. */
+// Dark Cloud Expanded: the frame a refused Sevenfold Rite break is cut at, once the sword's
+// picture has faded out (it fades by 4 of 128 a frame).
+constexpr float kSevenfoldCutFrame = 32.0f;
+
 constexpr std::array<int, WEP_EFFECT_KIND_COUNT> kEffectFileNo = {0, 1, 2, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3};
 
 /** Sound effect set each WepEffectKind loads, or -1 for none. */
@@ -497,6 +501,12 @@ void CWeaponLevelUp::SetStatusBreak(WEAPON_HAVE *have, CCharacter *character, CW
 
     AttachMentValuePlus(reinterpret_cast<ATTACH_LIST *>(&status_item_no), &total, transfer);
     flags = CheckWeaponOptionStatus(flags);
+
+    // Dark Cloud Expanded: Sevenfold Rite refuses a 7 Branch Sword below +7, so no sphere is made.
+    if (expanded::SevenfoldRefuses(*weapon)) {
+        return;
+    }
+
     CDngStatusData *dng_status = SaveData->GetDngStatus();
     int             slot_no = GetBoardSpace(0x5A, &page);
     auto           *items = reinterpret_cast<ATTACH_LIST *>(dng_status->consumable_items);
@@ -812,6 +822,14 @@ void CWeaponLevelUp::Step() {
         case WEP_EFFECT_STATE_BREAK_PLAY:
             effect_timer += 1.0f;
 
+            // Dark Cloud Expanded: Sevenfold Rite cuts a refused break short once the sword has
+            // faded out; the clip winds down, the sword comes back and nothing is lost.
+            if (expanded::SevenfoldRefused() && effect_timer >= kSevenfoldCutFrame) {
+                effect_state = WEP_EFFECT_STATE_BREAK_DONE;
+                effect_timer = 0.0f;
+                return;
+            }
+
             if (motion_state == 3) {
                 effect_motion++;
                 effect.motion_no = effect_motion;
@@ -935,7 +953,7 @@ void CWeaponLevelUp::Draw() {
 
     int alpha = 128;
 
-    if (effect_state == WEP_EFFECT_STATE_BREAK_DONE && !(effect.GetNowTime() < 134.0f)) {
+    if (effect_state == WEP_EFFECT_STATE_BREAK_DONE && !(effect.GetNowTime() < 134.0f) && !expanded::SevenfoldRefused()) {
         MenuTextureReload(MenuShadowReadBlock);
         DrawIconParts(ITEM_ATTACH_SYNTHESIS_SPHERE, 0x132, 0xD0, 0, 0x280, alpha, status_weapon_no);
     }
@@ -1038,6 +1056,13 @@ void CWeaponLevelUp::DrawMes() {
                 mes_id = 0x191;
                 mes_no[0] = GetCommonItemInfo(status_weapon_no)->msg + 100;
                 values[0] = status_weapon_level;
+
+                // Dark Cloud Expanded: a refused Sevenfold Rite break has its own line.
+                if (expanded::SevenfoldRefused()) {
+                    mes_no[0] = -1;
+                    values[0] = -2;
+                }
+
                 break;
             case WEP_EFFECT_STATE_BUILDUP_DONE:
                 mes_id = 0x192;

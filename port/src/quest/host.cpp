@@ -23,6 +23,7 @@
 #include "editmenu.hpp"
 #include "editpartsinfo.hpp"
 #include "expanded_fishing.hpp"
+#include "expanded_weapons.hpp"
 #include "itemdata.hpp"
 #include "localize/localize.hpp"
 #include "main.hpp"
@@ -370,6 +371,7 @@ void QuestHostNewGame() {
     CustomShopEnd();
     // Dark Cloud Expanded: Arise Mardan's Max Magic from the new game's records.
     dc::game::expanded::FishRecordsUpdate();
+    dc::game::expanded::InsuranceLoad();
 }
 
 bool QuestHostSave(const fs::path &save_directory) {
@@ -391,6 +393,7 @@ void QuestHostLoad(const fs::path &save_directory) {
     if (!stream) {
         ResetProgress();
         dc::game::expanded::FishRecordsUpdate();
+        dc::game::expanded::InsuranceLoad();
         return;
     }
     const std::string text{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
@@ -402,6 +405,7 @@ void QuestHostLoad(const fs::path &save_directory) {
     // Dark Cloud Expanded: the loaded save's records kept to one per species, and Arise Mardan's
     // Max Magic from them.
     dc::game::expanded::FishRecordsUpdate();
+    dc::game::expanded::InsuranceLoad();
 }
 
 void QuestHostDelete(const fs::path &save_directory) {

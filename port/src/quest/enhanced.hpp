@@ -47,6 +47,18 @@ int EnhancedBackFloorItem(int dungeon);
 int EnhancedEdenLimit(int limit);
 
 /**
+ * Whether the healing fountains are off: while Samba's challenge runs on Moon Sea floor 7's back
+ * floor, as Enhanced turns them off there.
+ */
+bool EnhancedFountainsOff();
+
+/**
+ * Whether the Mayor's bonus quests are open (Pickle has seen the full collection). Enhanced's
+ * Fairy King sells the Crystal Eyeball from then on.
+ */
+bool EnhancedMayorOpen();
+
+/**
  * The most water (ten to a drop) a Gourd may be used below: 90, or 110 once the Mayor's bonus
  * quests are open, so the gauge reaches 12 drops.
  */

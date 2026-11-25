@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "clsmes.hpp"
+#include "quest/enhanced.hpp"
 #include "data/data_read.hpp"
 #include "itemdata.hpp"
 #include "menuetc.hpp"
@@ -238,6 +239,8 @@ const DailyTable kLedanDay3 = {118, 119};                     // Metal Breaker, 
 const DailyTable kFairyKingDay2 = {181, 181, 230};            // Treasure Chest Key x2, Flapping Duster
 const DailyTable kFairyKingDay3 = {169, 186, 187, 188, 189, 193, 197, 199}; // fishing baits, Potato Cake
 
+constexpr int kFairyKingShop = 11;
+
 const std::array<DailyShop, 7> kDailyShops = {{
     {0, 19, {&kGafferDay1, &kGems, &kGafferDay3, &kUseful, &kDbcWeapons}},                   // Gaffer
     {1, 16, {&kWiseOwlDay1, &kUseful, &kWiseOwlWeapons, &kWiseOwlDay4, &kGems}},            // Wise Owl Forest
@@ -275,8 +278,17 @@ void SetDailyGoods(int shop) {
         auto             &goods = kRetailGoods[shop];
         goods[daily.slot] = table[DailyPick(day, shop, static_cast<int>(table.size()))];
 
-        if (daily.slot + 1 < kShopGoods) {
-            goods[daily.slot + 1] = -1;
+        int end = daily.slot + 1;
+
+        // Enhanced: once the Mayor's bonus quests are open, the Fairy King also sells the
+        // Crystal Eyeball, after his daily item.
+        if (shop == kFairyKingShop && EnhancedMayorOpen() && end < kShopGoods) {
+            goods[end] = ITEM_CRYSTAL_EYEBALL;
+            end++;
+        }
+
+        if (end < kShopGoods) {
+            goods[end] = -1;
         }
     }
 }

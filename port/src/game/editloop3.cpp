@@ -39,6 +39,7 @@
 #include "editground.hpp"
 #include "editloop.hpp"
 #include "editpartsinfo.hpp"
+#include "enhanced_town.hpp"
 #include "effect.hpp"
 #include "fishing.hpp"
 #include "frame.hpp"
@@ -9470,7 +9471,9 @@ int EdTalkMode(CCharacter *player, CCameraFollow *camera, int mode, int *selecti
     sceVu0FVECTOR reference;
     sceVu0AddVector(reference, player_position, villager_position);
     sceVu0ScaleVector(reference, reference, 0.5f);
-    reference[1] += 15.0f;
+
+    // Dark Cloud Enhanced: the talk camera comes down for Xiao.
+    reference[1] += expanded::TownTalkHeight();
 
     if (camera != nullptr) {
         camera->FollowOff();

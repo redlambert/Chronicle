@@ -11,6 +11,7 @@
 
 namespace dc::game {
 
+class CCharacter;
 class CCollisionData;
 class CDungeonMap;
 class CMonstorUnit;
@@ -317,6 +318,23 @@ constexpr int kSevenfoldLevel = 7;
 float StatusBreakFactor(int item_no);
 
 /**
+ * Sevenfold Rite: a Status Break has just been confirmed for weapon. Gives back whether it is
+ * refused (a 7 Branch Sword below +7), which then holds until the next break: the break is
+ * cancelled mid-animation, the sword kept and no sphere made.
+ */
+bool SevenfoldRefuses(const WEAPON_HAVE &weapon);
+
+/**
+ * Whether the last Status Break confirmed was refused by Sevenfold Rite.
+ */
+bool SevenfoldRefused();
+
+/**
+ * The break result window's line, saying a refused 7 Branch Sword break failed; null otherwise.
+ */
+short *SevenfoldRefusalText(const ClsMes *mes, int line);
+
+/**
  * The most ABS a weapon may hold: its max, or twice that while Overtraining holds.
  */
 int AbsCap(int max_exp);
@@ -379,6 +397,17 @@ bool FireStolenShot(const float *origin, const float *direction, int damage, int
  * Matador and Dragon's Y. Returns true on the step the charge fills.
  */
 bool XiaoAimStep(bool holding);
+
+/**
+ * Xiao has let go of her shot while still drawing: whether Quick Draw (Super Steve with a Small
+ * Sword, Tsukikage or Heaven's Cloud sphere) fires it at once.
+ */
+bool QuickDrawRelease();
+
+/**
+ * Each dungeon step: Super Steve's Swift Strikes and Quick Draw on Xiao's own shot.
+ */
+void XiaoSphereStep();
 
 /**
  * Xiao is about to fire a pellet: Steal Shot, the charged shots and Double Impact fire their own
@@ -456,6 +485,12 @@ int SkeletonKey(const int *usable);
  * bag: Atlamillia Insurance saves it as a SynthSphere.
  */
 void OnWeaponBroke(const WEAPON_HAVE &weapon);
+
+/**
+ * A save has been loaded or a new game started: Atlamillia Insurance's waiting spheres are read
+ * back from the save's quest file.
+ */
+void InsuranceLoad();
 
 /**
  * Every monster of a new floor has been placed and the floor's key handed out: Dark Cloud
@@ -561,6 +596,17 @@ void OnMonstersLoading();
  * Mirage's decoy, a still copy of Ungaga.
  */
 void DecoyDraw(const float *scene_ambient);
+
+/**
+ * The dungeon's raster pass, after the floor's torches: the heat shimmer over the Mirage's decoy.
+ */
+void DecoyHaze();
+
+/**
+ * Monster m is drawn stopped: one the Sun Sword's flash has just blinded is snapped to its
+ * species' guard pose and held there, cowering.
+ */
+void CowerMotion(int m, CCharacter &chara);
 
 /**
  * A new floor begins: clears what each effect remembers of the last.

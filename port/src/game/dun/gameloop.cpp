@@ -2371,6 +2371,7 @@ void DunMainDraw() {
     sceVu0CopyVector(raster_pos, CharaFrame->position);
     TexManager.ReloadTexture(Vif1Packet, 0xE);
     NowDngMap->DrawRaster(CharaFrame);
+    expanded::DecoyHaze(); // Dark Cloud Expanded: the heat shimmer over the Mirage's decoy.
 
     if (NowDngMap->map_type == 1) {
         NowDngMap->DrawFire(CharaFrame, NowCamera__3);
@@ -4476,6 +4477,12 @@ void BattleActionPlay_Jinn(CCharacter *chara, int aimed) {
                 BtActStatus.action_no = 13;
             }
         }
+    }
+
+    // Dark Cloud Expanded: Quick Draw fires the moment the shot is let go.
+    if (BtActStatus.action_no == 11 && BtActStatus.action_step != 0 && expanded::QuickDrawRelease()) {
+        BtActStatus.action_no = 13;
+        driveNoInterpolate = 1;
     }
 
     if (BtActStatus.action_no == 13) {

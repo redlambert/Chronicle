@@ -1041,9 +1041,18 @@ void MinibossStep() {
         return;
     }
 
+    // Dark Cloud Enhanced (Dungeon.cs CheckMiniBossStamina): a miniboss stays in the stamina
+    // state while it lives, dealing twice the damage and taking half, topped up before it runs out.
+    constexpr int kAngerLeast = 60;
+    constexpr int kAngerTopUp = 60000;
+
     for (Miniboss &boss : g_minibosses) {
-        const MONSTOR &monster = NowMonstorUnit->monster[boss.slot];
+        MONSTOR &monster = NowMonstorUnit->monster[boss.slot];
         boss.alive = monster.state >= 1 && monster.hp > 0;
+
+        if (boss.alive && monster.anger_timer < kAngerLeast) {
+            monster.anger_timer = kAngerTopUp;
+        }
     }
 
     CDngStatusData *status = SaveData->GetDngStatus();

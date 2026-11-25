@@ -152,7 +152,7 @@
         { "item_no": 228, "buy_price": 900, "sell_price": 450 },
         { "item_no": 229, "buy_price": 1200, "sell_price": 600 },
         { "item_no": 230, "buy_price": 1500, "sell_price": 750 },
-        { "item_no": 231, "buy_price": 1000, "sell_price": 500 },
+        { "item_no": 231, "buy_price": 5000, "sell_price": 500 },
         { "item_no": 232, "buy_price": 2, "sell_price": 1 },
         { "item_no": 233, "buy_price": 2, "sell_price": 1 },
         { "item_no": 234, "buy_price": 2, "sell_price": 1 },

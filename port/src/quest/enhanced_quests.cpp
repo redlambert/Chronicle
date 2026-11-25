@@ -1314,6 +1314,10 @@ void EnhancedDungeonStep() {
                                  4 * kStepsPerSecond);
 }
 
+bool EnhancedFountainsOff() {
+    return g_challenge.running && g_challenge.kind == Challenge::Samba;
+}
+
 int EnhancedBackFloorItem(int dungeon) {
     const IGame *game = Game();
 
@@ -1506,6 +1510,10 @@ int EnhancedEdenLimit(int limit) {
     return MayorOpen() ? kBonusLife : limit;
 }
 
+bool EnhancedMayorOpen() {
+    return MayorOpen();
+}
+
 float EnhancedGourdLimit() {
     return MayorOpen() ? kBonusWater - 10.0f : 90.0f;
 }
@@ -1514,6 +1522,8 @@ float EnhancedGourdLimit() {
 
 void RegisterEnhancedQuests() {
     Register(Builder(std::string(kFlags)).Stages({"open"}).Build());
+    // Dark Cloud Expanded: Atlamillia Insurance keeps its waiting spheres here (expanded_weapons.cpp).
+    Register(Builder("expanded_atlamillia").Stages({"open"}).Build());
 
     for (const Hunter &hunter : kHunters) {
         Register(HuntQuest(hunter));

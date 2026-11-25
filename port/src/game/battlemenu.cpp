@@ -2825,6 +2825,13 @@ void WeaponMenuSelect() {
                     case WEP_STATE_STATUS_BREAK_EFFECT: {
                         int equipped = BtlMenuStatusPt->GetEquipWeaponSlot(WepMenu.chara);
 
+                        // Dark Cloud Expanded: a refused Sevenfold Rite break keeps the sword, so
+                        // nothing is unequipped.
+                        if (expanded::SevenfoldRefused()) {
+                            MenuWepLevelUp.lost_default_weapon = false;
+                            break;
+                        }
+
                         if (WepMenu.weapon_slot == equipped || DngWepHavePt[equipped].item_no < ITEM_WEAPON_START) {
                             EquipDefaultWeapon(WepMenu.chara);
                         }

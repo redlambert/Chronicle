@@ -62,6 +62,12 @@ bool TownAllySkipsEventPoints();
 float TownEyeHeight();
 
 /**
+ * How far above the speakers' feet the talk camera looks: 15, or 10 for Xiao so the view comes
+ * down to her.
+ */
+float TownTalkHeight();
+
+/**
  * EdLoadMainChara has read a character file: Enhanced's motion fixes for the allies' town files
  * go into its config before it is read, and the config is logged.
  */

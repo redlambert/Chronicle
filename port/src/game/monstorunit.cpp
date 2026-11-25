@@ -812,6 +812,11 @@ void CMonstorUnit::DrawMonstor() {
             if (paused != 0 || monster[i].stop_timer > 0) {
                 chara[i][0].SetMotion(chara[i][0].motion_no, 1);
 
+                // Dark Cloud Expanded: an enemy blinded by the Sun Sword cowers in its guard.
+                if (paused == 0) {
+                    expanded::CowerMotion(i, chara[i][0]);
+                }
+
                 for (int j = 0; j < monster[i].attachment_count; j++) {
                     if (chara[i][j + 1].frame != nullptr) {
                         chara[i][j + 1].SetMotion(chara[i][j + 1].motion_no, 1);

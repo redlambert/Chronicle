@@ -5,6 +5,10 @@
  * washed out or dimmed, and tints laid over a weapon, the player or an enemy. The weapon effects in
  * expanded_weapons.cpp call these; the game files call the few hooks at the end. */
 
+namespace dc::render {
+struct PortDecodedTexture;
+}
+
 namespace dc::game::expanded::fx {
 
 /**
@@ -85,6 +89,19 @@ void PlayerTint(const float *rgb);
  */
 void MonsterTint(int m, const float *rgb, int steps);
 
+/**
+ * A round shadow on the floor at (x, ground, z), radius across, darkness 0 to 1: for a prop the
+ * game draws none for (the Terra Sword's rock, Desert Bloom's cactus). Drawn in the dungeon's
+ * model pass.
+ */
+void GroundShadow(float x, float ground, float z, float radius, float darkness);
+
+/**
+ * A soft glow facing the camera at at, radius across, in rgb (0 to 255) at strength 0 to 1, added
+ * to the scene. Drawn in the dungeon's model pass.
+ */
+void GlowDisc(const float *at, float radius, const float *rgb, float strength);
+
 // ── Hooks ─────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -111,5 +128,12 @@ void WeaponDraw(bool begin);
  * A new floor: everything stops.
  */
 void Reset();
+
+/**
+ * A texture has been decoded and is about to be made: paints the Confuse ability icon into the
+ * status windows' icon sheet, and recolours the Babel's Spear beam's own copy of the Dark Genie's
+ * beam light blue.
+ */
+void PaintTexture(const char *name, int block, render::PortDecodedTexture &texture);
 
 } // namespace dc::game::expanded::fx

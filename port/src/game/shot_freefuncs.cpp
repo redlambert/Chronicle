@@ -1,5 +1,6 @@
 #include "platform/config.hpp"
 #include "expanded_weapons.hpp"
+#include "quest/enhanced.hpp"
 #include "shot_freefuncs.hpp"
 
 #include <libvu0.h>
@@ -243,7 +244,12 @@ void WaterSplash_Init() {
 }
 
 void HealingWater() {
-    const bool in_spring = CheckHealZone() || CheckHealingWater();
+    bool in_spring = CheckHealZone() || CheckHealingWater();
+
+    // Dark Cloud Enhanced: the fountains are off during Samba's dagger-only challenge.
+    if (dc::quest::EnhancedFountainsOff()) {
+        in_spring = false;
+    }
 
     // Dark Cloud Expanded: the Kitchen Knife's blessing comes from the spring.
     expanded::SpringStep(in_spring);

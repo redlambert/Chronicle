@@ -76,7 +76,7 @@ const AllyTalk kAllyTalk[] = {
         1,
         "09",
         -1,
-        "Hey there, I've been seeing you\nhang out with {name1}! Are you\nhis little sidekick now?",
+        "Hey there, I've been seeing you\nhang out with {name1}! Are you\nhis little sidekick now? {heart}",
         "{name1} may act like a tough guy but\nhe doesn't always use his head.\nSometimes I really worry about him.{page}It's not like I can go with him\nyou know. You can though, I see\nyou following him around everywhere.{page}Can you do me a favour and make\nsure he stays out of trouble?\nThanks {name2}, I appreciate it.",
     },
     {
@@ -84,7 +84,7 @@ const AllyTalk kAllyTalk[] = {
         1,
         "10",
         -1,
-        "I appreciate how you are helping {name1}\non his journey, I still wonder where\nhe got that change potion.{page}It's hard for one person to try change\nthe world but if we all work together\nas allies, anything is possible. Don't\nworry, I won't tell anyone your secret",
+        "I appreciate how you are helping {name1}\non his journey, I still wonder where\nhe got that change potion.{page}It's hard for one person to try change\nthe world but if we all work together\nas allies, anything is possible. Don't\nworry, I won't tell anyone your secret {heart}",
         "Is {name1} taking proper care of you?\nThat boy has a good heart but sometimes\nhe works way too hard, he gets\nthat habit from his father.",
     },
     {
@@ -289,7 +289,7 @@ const AllyTalk kAllyTalk[] = {
         "09",
         -1,
         "Wow I love your clothes!\nBefore the Dark Genie attacked our\nvillage I was celebrating the{page}Star festival, it was really scary!",
-        "I remember hearing an old story from\nQueens about its ruler La Saia falling\nin love with a commoner.{page}They say they ran away to be together\nforever, how romantic",
+        "I remember hearing an old story from\nQueens about its ruler La Saia falling\nin love with a commoner.{page}They say they ran away to be together\nforever, how romantic {heart}",
     },
     {
         0,
@@ -656,7 +656,7 @@ const AllyTalk kAllyTalk[] = {
         2,
         "23",
         -1,
-        "Hey there, who would have thought the\nson of the legendary hunter would be so\nhandsome!",
+        "Hey there, who would have thought the\nson of the legendary hunter would be so\nhandsome! {heart}",
         "Once you and your friends are done\nsaving the world, we should go shopping\nsometime!",
     },
     {
@@ -1602,7 +1602,7 @@ const AllyTalk kAllyTalk[] = {
         1,
         "53",
         -1,
-        "Gosuke and Toto would always pretend to\nbe warriors and have adventures\ntogether!{page}Maybe you could join them and be an\nadventurer too!{page}You're a small cat now I'm sure you'll\nchange the world one day! Tehehe",
+        "Gosuke and Toto would always pretend to\nbe warriors and have adventures\ntogether!{page}Maybe you could join them and be an\nadventurer too!{page}You're a small cat now I'm sure you'll\nchange the world one day! Tehehe {heart}",
         "Were you also stuck inside of a weird\nbubble?{page}I wonder how that all happened anyways,\none minute we're minding our own\nbusiness and the next we're gone...{page}I guess everything can change in the\nblink of an eye huh {name2}.",
     },
     {
@@ -1782,7 +1782,7 @@ const AllyTalk kAllyTalk[] = {
         3,
         "53",
         -1,
-        "Wow I love your outfit, it's so cute!",
+        "Wow I love your outfit, it's so cute! {heart}",
         "I heard that you want to be the most\npower genie in the world, I bet you can\ndo it!",
     },
     {
@@ -1962,7 +1962,7 @@ const AllyTalk kAllyTalk[] = {
         5,
         "53",
         -1,
-        "You may be small and cuddly, but I bet\nyou're quite the warrior!",
+        "You may be small and cuddly, but I bet\nyou're quite the warrior! {heart}",
         "Have you been teaching {name5} a\nthing or two when it comes to fighting?",
     },
     {

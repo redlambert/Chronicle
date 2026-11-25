@@ -355,6 +355,13 @@ float TownEyeHeight() {
     return g_ally == kXiao ? 5.0f : 14.0f;
 }
 
+float TownTalkHeight() {
+    // Dark Cloud Enhanced lowers the talk camera for Xiao. It does so by pointing the game's talk
+    // camera number past its three views, so the camera reads whatever lies there; here the point
+    // it looks at simply comes down, halfway between her eyes and the villager's.
+    return g_ally == kXiao ? 10.0f : 15.0f;
+}
+
 void TownCharaPackLoaded(const char *path, u_int *pack) {
     if (path == nullptr || pack == nullptr) {
         return;

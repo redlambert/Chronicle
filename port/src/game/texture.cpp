@@ -25,6 +25,7 @@
 #include "data/data_read.hpp"
 #include "dataalloc.hpp"
 #include "dataread.hpp"
+#include "expanded_effects.hpp"
 #include "localize/localize_texture.hpp"
 #include "mglib.hpp"
 #include "render/texture_registry.hpp"
@@ -593,6 +594,8 @@ void Enter(CTextureManager &manager, EnterMode mode, int block, char *name, u_ch
             }
         }
         LocalizeTexture(name, decoded);
+        // Dark Cloud Expanded: the Confuse icon and the Babel's Spear beam's colour.
+        expanded::fx::PaintTexture(name, block, decoded);
         caption::PreparePainted(name, decoded);
         MakeGroundPeriodic(name, decoded);
         DumpTexture(name, decoded);

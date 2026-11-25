@@ -24,7 +24,9 @@
 #include "dataread.hpp"
 #include "dngmessageman.hpp"
 #include "dngstatusdata.hpp"
+#include "camerafollow.hpp"
 #include "dungeonmap.hpp"
+#include "healeffect.hpp"
 #include "dungeonparts.hpp"
 #include "dun/gameloop.hpp"
 #include "frame.hpp"
@@ -51,6 +53,13 @@
 #include "texture.hpp"
 #include "userstatus.hpp"
 #include "quest/enhanced.hpp"
+#include "quest/framework.hpp"
+
+namespace dc::game {
+
+extern CSHOT *NowShotData; // dun/gameloop.cpp: the player's pellets
+
+} // namespace dc::game
 
 namespace dc::game::expanded {
 
@@ -889,6 +898,55 @@ void SolarStep(int held) {
  * The flash, as a primed swing lands: a hit on every enemy in reach, each stopped for the
  * blindness.
  */
+// Dark Cloud Expanded: an enemy the flash blinds cowers in its guard while it lasts. Each
+// species' guard loop by its model, from Expanded's table (GameData/EnemyGuardMotions.cs); one
+// with no guard keeps the pose it was caught in.
+struct GuardLoop {
+    const char *model;
+    int         motion;
+};
+
+// clang-format off
+constexpr GuardLoop kGuardLoops[] = {
+        {"c21a", 22}, {"e01a", 6}, {"e03a", 6}, {"e06a", 6}, {"e07a", 6}, {"e08a", 6}, {"e101", 6},
+        {"e103", 6}, {"e104", 6}, {"e106", 6}, {"e108", 6}, {"e109", 6}, {"e10a", 6}, {"e111", 6},
+        {"e112", 6}, {"e113", 6}, {"e114", 6}, {"e115", 6}, {"e116", 6}, {"e117", 6}, {"e118", 6},
+        {"e119", 6}, {"e124", 6}, {"e125", 6}, {"e126", 6}, {"e127", 6}, {"e128", 6}, {"e129", 6},
+        {"e130", 6}, {"e131", 6}, {"e132", 6}, {"e133", 6}, {"e135", 6}, {"e136", 6}, {"e137", 6},
+        {"e138", 6}, {"e139", 6}, {"e141", 6}, {"e142", 6}, {"e143", 6}, {"e144", 6}, {"e145", 6},
+        {"e146", 6}, {"e149", 6}, {"e14a", 6}, {"e150", 6}, {"e151", 6}, {"e152", 6}, {"e155", 6},
+        {"e159", 6}, {"e15a", 6}, {"e160", 6}, {"e161", 6}, {"e162", 6}, {"e163", 6}, {"e164", 6},
+        {"e16a", 6}, {"e17a", 6}, {"e18a", 6}, {"e19a", 6}, {"e20a", 6}, {"e21a", 6}, {"e22a", 6},
+        {"e23a", 6}, {"e24a", 6}, {"e26a", 6}, {"e27a", 6}, {"e28a", 6}, {"e30a", 6}, {"e31a", 6},
+        {"e32a", 6}, {"e33a", 6}, {"e35a", 6}, {"e37a", 6}, {"e39a", 6}, {"e40a", 6}, {"e42a", 6},
+        {"e43a", 6}, {"e44a", 6}, {"e45a", 6}, {"e46a", 6}, {"e47a", 6}, {"e48a", 6}, {"e49a", 6},
+        {"e50a", 6}, {"e51a", 6}, {"e52a", 6}, {"e55a", 6}, {"e56a", 6}, {"e59a", 6}, {"e62a", 6},
+        {"e63a", 6}, {"e64a", 6}, {"e65a", 6}, {"e69a", 6}, {"e70a", 6}, {"e71a", 6}, {"e72a", 6},
+        {"e73a", 6}, {"e74a", 6}, {"e75a", 6}, {"e76a", 6}, {"e79a", 6}, {"e81a", 6}, {"e83a", 6},
+        {"e86a", 6}, {"e90a", 6}, {"e91a", 6},
+};
+// clang-format on
+
+std::array<bool, 16> g_cower{};
+
+int GuardLoopMotion(const MONSTOR &monster) {
+    constexpr int kModels = static_cast<int>(sizeof(NowMonstorUnit->model) / sizeof(NowMonstorUnit->model[0]));
+
+    if (NowMonstorUnit == nullptr || monster.base_model < 0 || monster.base_model >= kModels) {
+        return -1;
+    }
+
+    const char *name = NowMonstorUnit->model[monster.base_model].model_name[0];
+
+    for (const GuardLoop &entry : kGuardLoops) {
+        if (std::strncmp(name, entry.model, std::strlen(entry.model)) == 0) {
+            return entry.motion;
+        }
+    }
+
+    return -1;
+}
+
 void SolarBlind() {
     g_solar_blind = kSolarBlindSteps;
 
@@ -926,6 +984,7 @@ void SolarBlind() {
         NowColData->SetKickBack(CharaMain.pos, kSolarKickSpeed, kSolarKickDecay, 2);
 
         monster.stop_timer = std::max(monster.stop_timer, kSolarBlindSteps);
+        g_cower[static_cast<std::size_t>(m)] = true;
     }
 
     // A white pulse on Toan as the room is blinded, and the room washed out with the sword's light.
@@ -1026,8 +1085,37 @@ bool  g_zeus_charged = false;
 bool  g_zeus_lunging = false;
 float g_zeus_lunge_from[3] = {};
 
+// Dark Cloud Expanded: the camera held at its world height through the charged lunge, so it does
+// not rise and fall with Toan (CameraHold.cs); its distance and angle stay the game's.
+bool  g_zeus_camera_held = false;
+float g_zeus_camera_y = 0.0f;      // the eye's world height when the lunge began
+float g_zeus_camera_height = 0.0f; // the camera's own height setting, put back after
+
+void ZeusCameraHold() {
+    if (NowCamera__3 == nullptr) {
+        return;
+    }
+
+    if (!g_zeus_camera_held) {
+        g_zeus_camera_held = true;
+        g_zeus_camera_height = NowCamera__3->height;
+        g_zeus_camera_y = NowCamera__3->follow[1] + NowCamera__3->height;
+    }
+
+    NowCamera__3->height = g_zeus_camera_y - NowCamera__3->follow[1];
+}
+
+void ZeusCameraRelease() {
+    if (g_zeus_camera_held && NowCamera__3 != nullptr) {
+        NowCamera__3->height = g_zeus_camera_height;
+    }
+
+    g_zeus_camera_held = false;
+}
+
 void ZeusStep(int held) {
     if (held != ITEM_WEAPON_SWORD_OF_ZEUS) {
+        ZeusCameraRelease();
         g_zeus_chain = false;
         g_zeus_charged = false;
         g_zeus_lunging = false;
@@ -1077,6 +1165,7 @@ void ZeusStep(int held) {
             g_zeus_lunge_from[2] = CharaMain.pos[2];
         }
 
+        ZeusCameraHold();
         return;
     }
 
@@ -1103,6 +1192,7 @@ void ZeusStep(int held) {
         setUnitAmbientAnime(90.0f, 1.0f, 255.0f, 255.0f, 255.0f);
     }
 
+    ZeusCameraRelease();
     g_zeus_lunging = false;
     g_zeus_charged = false;
     g_zeus_charge_steps = 0;
@@ -1289,15 +1379,20 @@ struct Lure {
 // Ungaga's guard held a quarter second flashes him and leaves a still copy of him in the guard
 // pose where he stood. For 12 seconds (18 from Hercules' Wrath) every enemy goes for the copy
 // instead of him; one that is hurt sees through it and turns back to him. A new guard while one
-// stands replaces it. It ends on expiry, a weapon or party change and a new floor. Left out: the
-// heat shimmer, and the dissolve when one copy hands off to the next (it is replaced at once).
+// stands replaces it, the old copy dissolving as the new one appears. It ends on expiry, a weapon
+// or party change and a new floor. It stands in a heat shimmer (DecoyHaze).
 constexpr int   kMirageGuardSteps = 15;
 constexpr int   kMirageSteps = 12 * kStepsPerSecond;
 constexpr int   kMirageHerculesSteps = 18 * kStepsPerSecond;
 constexpr int   kMirageFadeSteps = kStepsPerSecond / 2;
 constexpr float kMirageAlpha = 0.85f;
 
+constexpr int   kMirageHandoffSteps = kStepsPerSecond / 4;
+
 PoseCopy g_mirage_copy;
+PoseCopy g_mirage_old;            // the copy a new cast replaced, dissolving where it stood
+int      g_mirage_old_steps = 0;  // left of its dissolve
+int      g_mirage_delay = 0;      // steps the new copy waits to appear, while the old one dissolves
 Lure     g_mirage_lure;
 int      g_mirage_steps = 0;      // left to stand
 int      g_mirage_life = 0;       // what it started with
@@ -1315,6 +1410,9 @@ bool DecoyUp() {
 
 void MirageEnd() {
     g_mirage_copy.Drop();
+    g_mirage_old.Drop();
+    g_mirage_old_steps = 0;
+    g_mirage_delay = 0;
     g_mirage_lure.Drop();
     g_mirage_steps = 0;
     g_mirage_weapon = -1;
@@ -1327,6 +1425,16 @@ void MirageReset() {
 }
 
 void MirageCast(int held) {
+    // Dark Cloud Expanded: a copy already standing dissolves where it is over a quarter second
+    // while the new one waits to appear.
+    g_mirage_delay = 0;
+
+    if (g_mirage_lure.active && g_mirage_copy.Valid()) {
+        g_mirage_old = g_mirage_copy;
+        g_mirage_old_steps = kMirageHandoffSteps;
+        g_mirage_delay = kMirageHandoffSteps;
+    }
+
     g_mirage_copy.Take(CharaMain, NowWeapon);
     g_mirage_lure.Place(CharaMain.pos);
     g_mirage_weapon = held;
@@ -1335,8 +1443,20 @@ void MirageCast(int held) {
     setUnitAmbientAnime(15.0f, 1.0f, 255.0f, 230.0f, 160.0f);
 }
 
+/**
+ * Who wields the Mirage: Ungaga with the Mirage line, or Xiao with Super Steve and a sphere of
+ * it (Expanded's Mirage.cs: both share the guard pose it waits for).
+ */
+bool MirageWielder() {
+    return UserStatus != nullptr && (UserStatus->cur_chara == CHARA_UNGAGA || UserStatus->cur_chara == CHARA_XIAO);
+}
+
 void MirageStep() {
-    const int held = HeldBy(CHARA_UNGAGA);
+    const int held = UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO ? EffectOf(CHARA_XIAO) : HeldBy(CHARA_UNGAGA);
+
+    if (g_mirage_old_steps > 0 && --g_mirage_old_steps == 0) {
+        g_mirage_old.Drop();
+    }
 
     if (!MirageLine(held)) {
         if (g_mirage_lure.active || g_mirage_guard != 0) {
@@ -1448,8 +1568,8 @@ void HerculesStep(int held) {
 // While an Atlamillia Sword is owned, a weapon that breaks in a dungeon is saved as a SynthSphere
 // of itself, at a tenth of its stats per level plus one, up to half; its attachments are lost.
 // The sphere waits in a small chest on a random floor of that dungeon that has atla, placed each
-// time that floor is built until it is taken (Demon Shaft has none: the next floor built). It
-// lasts until the game is closed.
+// time that floor is built until it is taken (Demon Shaft has none: the next floor built). The
+// waiting spheres are kept with the save, in quests.json.
 struct InsuredSphere {
     int         dungeon;
     int         floor; // -1: the next floor built
@@ -1459,6 +1579,33 @@ struct InsuredSphere {
 
 std::vector<InsuredSphere> g_insured;
 std::string                g_insured_notice; // said once the game's own break message is done
+
+// The save's copy: a count, then each sphere's dungeon, floor and its 32 bytes as eight numbers.
+constexpr std::string_view kInsuranceId = "expanded_atlamillia";
+constexpr int              kInsuranceWords = sizeof(ATTACH_LIST) / sizeof(s32);
+
+void InsuranceSave() {
+    dc::quest::Progress *progress = dc::quest::EditProgress(kInsuranceId);
+
+    if (progress == nullptr) {
+        return;
+    }
+
+    progress->vars.clear();
+    progress->vars["count"] = static_cast<int>(g_insured.size());
+
+    for (std::size_t i = 0; i < g_insured.size(); i++) {
+        const InsuredSphere &insured = g_insured[i];
+        std::array<s32, kInsuranceWords> words{};
+        std::memcpy(words.data(), &insured.sphere, sizeof(ATTACH_LIST));
+        progress->vars[std::format("{}.dungeon", i)] = insured.dungeon;
+        progress->vars[std::format("{}.floor", i)] = insured.floor;
+
+        for (int word = 0; word < kInsuranceWords; word++) {
+            progress->vars[std::format("{}.w{}", i, word)] = words[static_cast<std::size_t>(word)];
+        }
+    }
+}
 
 int InsuredFloor(int dungeon) {
     if (dungeon < 0 || dungeon >= 6 || UserStatus == nullptr) {
@@ -1917,6 +2064,7 @@ struct Pellet {
     float kick_back = 0.0f;    // a charged pellet's kick, from this far behind it; 0 for none
     bool  crush = false;       // a Charging Bull pellet, which passes guards
     int   sword = -1;          // Super Steve: the sword whose move a charged pellet carries
+    float wind = -1.0f;        // Super Steve with Heaven's Cloud: the burst's charge, 0 to 1, or -1
 };
 
 std::array<Pellet, 12> g_pellets;
@@ -1932,6 +2080,35 @@ bool g_aim_holding = false;
 int  g_aim_steps = 0;
 bool g_aim_charged = false;
 int  g_charge_armed = 0;
+int  g_charge_hold = 0; // steps the shot that armed was held
+
+// Dark Cloud Expanded: Super Steve's shot versions of the other weapons' charges.
+// The Halberd line's (Halberd.cs DriveSphere): half a second held; the pellet flies the form's
+// travel faster, drawn its size larger, at 1.5x the attack.
+constexpr int kTornadoShotSteps = kStepsPerSecond / 2;
+// Heaven's Cloud's two stages (HeavensCloudSphere.cs): an eighth of three seconds empowers the
+// shot, the whole three is its most. Empowered, the pellet grows to 8x and 1.5x the attack, and
+// bursts where it strikes in a wind blast of 60 to 160 units for 0.75x the attack, throwing
+// everything clear from a point pulled back toward Xiao.
+constexpr int   kCloudFullSteps = 3 * kStepsPerSecond;
+constexpr int   kCloudFirstSteps = kCloudFullSteps / 8;
+constexpr int   kCloudMostSteps = kCloudFullSteps * 98 / 100;
+constexpr float kCloudPelletMost = 8.0f;
+constexpr float kCloudDamageMost = 1.5f;
+constexpr float kCloudWindLeast = 60.0f;
+constexpr float kCloudWindMost = 160.0f;
+constexpr float kCloudWindDamage = 0.75f;
+constexpr float kCloudWindPullback = 5.0f;
+constexpr float kCloudWindKick = 6.0f;
+constexpr float kCloudWindDecay = 0.25f;
+// Mobius Ring's ramp (MobiusRingSphere.cs): every second and a half held, x1.5 more, the pellet
+// growing with it up to 15x.
+constexpr int   kMobiusShotCycle = kStepsPerSecond * 3 / 2;
+constexpr float kMobiusShotStep = 1.5f;
+constexpr float kMobiusPelletMost = 15.0f;
+constexpr int   kMobiusShotDamageMost = 65535;
+// Moonlit Focus (TsukikageSphere.cs): every pellet leaves at twice its speed.
+constexpr float kMoonlitShotSpeed = 2.0f;
 
 // Dragon's Breath: the Gemron shot for each element, Fire to Holy, then the Black Dragon's.
 constexpr int   kBreathShots[] = {5, 20, 23, 24, 25, 22};
@@ -2904,8 +3081,8 @@ struct FloorModel {
      * Draws it with its root at x, y, z, scaled, turned yaw about the vertical. A weapon is stood
      * on its tip axis; anything else is drawn as authored.
      */
-    void Draw(float x, float y, float z, float scale, float yaw, bool point_down = false) {
-        if (!Valid() || scale <= 0.0f) {
+    void Draw(float x, float y, float z, float scale, float yaw, bool point_down = false, float alpha = 1.0f) {
+        if (!Valid() || scale <= 0.0f || alpha <= 0.0f) {
             return;
         }
 
@@ -2955,7 +3132,22 @@ struct FloorModel {
             TexManager.ReloadTexture(Vif1Packet, block);
         }
 
+        // Drawn see-through through the ambient light's alpha, as a character's own is.
+        float saved_ambient[4];
+        MGGetAmbient(saved_ambient);
+
+        if (alpha < 1.0f) {
+            float ambient[4];
+            std::memcpy(ambient, saved_ambient, sizeof(ambient));
+            ambient[3] = 128.0f * alpha;
+            MGSetAmbient(ambient);
+        }
+
         MGDraw(root);
+
+        if (alpha < 1.0f) {
+            MGSetAmbient(saved_ambient);
+        }
 
         root->parent = parent;
         root->reference = reference;
@@ -3088,9 +3280,21 @@ void JudgementDraw() {
     }
 
     // Point-down, so the grip sits the blade's length above the tip.
-    const float scale = kJudgementScale * static_cast<float>(blade.grow) / kJudgementGrowSteps;
+    const float grown = static_cast<float>(blade.grow) / kJudgementGrowSteps;
+    const float scale = kJudgementScale * grown;
     const float grip_y = blade.tip_y + blade.model.tip * scale;
     blade.model.Draw(blade.x, grip_y, blade.z, scale, blade.yaw, true);
+
+    // Dark Cloud Expanded: the sword's glow disc rides on the blade, halfway down its length,
+    // growing in and shrinking away with it.
+    if (const SwordLook *look = LookOf(blade.item)) {
+        constexpr float kGlowShare = 0.6f;     // of the blade's length across
+        constexpr float kGlowStrength = 0.7f;
+
+        const float length = blade.model.tip * scale;
+        const float at[3] = {blade.x, blade.tip_y + 0.5f * length, blade.z};
+        fx::GlowDisc(at, kGlowShare * length, look->blade, kGlowStrength * grown);
+    }
 }
 
 /**
@@ -3315,13 +3519,11 @@ float ColumnRoot(const Column &column, bool &solid) {
             return CopyRoot(column, kBabelExposed, t);
         }
         case ColumnKind::Cactus: {
-            float t = static_cast<float>(column.age) / kCactusRiseSteps;
+            // Dark Cloud Expanded: it stands where it rose and fades away (ColumnsDraw), no longer
+            // solid once it starts to.
+            const float t = static_cast<float>(column.age) / kCactusRiseSteps;
 
-            if (column.age > column.life) {
-                t = 1.0f - static_cast<float>(column.age - column.life) / column.gone;
-            }
-
-            solid = t > 0.5f;
+            solid = t > 0.5f && column.age <= column.life;
             return CopyRoot(column, kCactusExposed, t);
         }
         case ColumnKind::Rock: {
@@ -3756,6 +3958,39 @@ void ColumnsStep() {
     }
 }
 
+/**
+ * Dark Cloud Expanded: the rock's and the cactus's round shadows on the floor (GroundShadow),
+ * gone as each starts to go. The rock's grows from nothing over the last 300 units of its fall.
+ */
+void ColumnShadow(const Column &column, float scale) {
+    constexpr float kShadowDarkness = 0.6f;
+
+    if (column.age > column.life) {
+        return;
+    }
+
+    if (column.kind == ColumnKind::Rock) {
+        constexpr float kShadowGrowDrop = 300.0f;
+        constexpr float kShadowLeast = 0.01f;
+
+        float share = 1.0f;
+
+        if (column.falling) {
+            share = std::clamp(1.0f - (column.fall_y - column.ground) / kShadowGrowDrop, kShadowLeast, 1.0f);
+        }
+
+        fx::GroundShadow(column.x, column.ground, column.z, share * kRockRadius, kShadowDarkness);
+        return;
+    }
+
+    if (column.kind == ColumnKind::Cactus) {
+        // The cactus's body, its arms and spikes left out, as Expanded's.
+        constexpr float kCactusShadow = 1.8f;
+
+        fx::GroundShadow(column.x, column.ground, column.z, kCactusShadow * scale, kShadowDarkness);
+    }
+}
+
 void ColumnsDraw() {
     if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
         return;
@@ -3768,7 +4003,25 @@ void ColumnsDraw() {
 
         bool        solid = false;
         const float root = ColumnRoot(*column, solid);
-        column->model.Draw(column->x, root, column->z, column->scale, column->yaw);
+        float       scale = column->scale;
+        float       alpha = 1.0f;
+
+        if (column->kind == ColumnKind::Cactus) {
+            // Dark Cloud Expanded: a touch of squash and stretch, overshooting to 3.4x as it comes
+            // up before it settles at 3x, then a half-second fade instead of sinking.
+            constexpr float kPeakRatio = 3.4f / 3.0f;
+            constexpr int   kSettleSteps = 12;
+
+            const float bounce = std::clamp(static_cast<float>(column->age) / (kCactusRiseSteps + kSettleSteps), 0.0f, 1.0f);
+            scale *= 1.0f + (kPeakRatio - 1.0f) * std::sin(3.14159265f * bounce);
+
+            if (column->age > column->life) {
+                alpha = 1.0f - static_cast<float>(column->age - column->life) / column->gone;
+            }
+        }
+
+        ColumnShadow(*column, scale);
+        column->model.Draw(column->x, root, column->z, scale, column->yaw, false, alpha);
     }
 }
 
@@ -3814,8 +4067,9 @@ bool ColumnBlocksMonster(int m) {
 // it, or her, is caught and fired back from it at the nearest enemy, with the weapon's attack and
 // the shot's own element and ailments. Enemy blows that land on it wear it down: the fifth breaks
 // it, with the weapon-break sound, and it cannot stand again for four seconds. Enemies near it
-// go for it in place of her. It grows in as it stands and shrinks away as it goes. Left out
-// against Expanded: its health on the attack gauge and its own draw-and-shoot animation.
+// go for it in place of her. It grows in as it stands and shrinks away as it goes. Its health
+// shows on the attack gauge, which refills over the four seconds once it breaks; each shot it
+// fires back it draws first, pulling back and snapping forward.
 constexpr float kShieldScale = 2.0f;
 constexpr float kShieldAhead = 12.0f;
 constexpr float kShieldHeight = 7.5f;
@@ -3828,6 +4082,10 @@ constexpr int   kShieldHitGap = kStepsPerSecond / 2;  // one enemy's blow counts
 constexpr int   kReflectGap = kStepsPerSecond / 4;    // between two shots it fires back
 constexpr float kShieldLure = 60.0f;       // enemies this near it go for it
 constexpr int   kShieldGrowSteps = 10;
+constexpr int   kShieldDrawSteps = kStepsPerSecond / 6; // the pull before each shot it fires back
+constexpr int   kShieldSnapSteps = kStepsPerSecond / 15;
+constexpr float kShieldPull = 2.5f;        // how far it draws back, at 1x
+constexpr float kGaugeFull = 100.0f;
 
 alignas(64) u_char g_reflect_frames[1024 * 1024];
 BorrowedShot       g_reflect(g_reflect_frames, sizeof(g_reflect_frames));
@@ -3847,6 +4105,9 @@ std::vector<CaughtShot> g_caught;
 int                     g_reflect_ready = 0;
 int                     g_shield_grow = 0;     // 0 to kShieldGrowSteps: how far it has grown in
 float                   g_shield_last[4] = {}; // where it stood, while it shrinks away
+int                     g_shield_pull = -1;    // steps into its draw before a shot, or -1
+int                     g_shield_snap = 0;     // steps left of its snap forward after one
+bool                    g_shield_gauge = false; // the attack gauge shows its health
 
 bool ReflectorHeld() {
     return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && EffectOf(CHARA_XIAO) == ITEM_WEAPON_ANGE_GEAR;
@@ -3862,6 +4123,36 @@ void ShieldReset() {
     g_reflect_ready = 0;
     g_reflect.Drop();
     g_shield_grow = 0;
+    g_shield_pull = -1;
+    g_shield_snap = 0;
+    g_shield_gauge = false;
+}
+
+/**
+ * Dark Cloud Expanded: while the slingshot stands, or is broken and coming back, the attack
+ * gauge is its health: a fifth gone with each blow, then refilling from empty over the cooldown.
+ * Once it is neither, the gauge is the game's again.
+ */
+void ShieldGauge() {
+    const bool held = ReflectorHeld();
+
+    if (held && g_shield_up) {
+        BtActStatus.action_gauge = kGaugeFull * static_cast<float>(kShieldHits - g_shield_hits) / kShieldHits;
+        g_shield_gauge = true;
+        return;
+    }
+
+    if (held && g_shield_broken > 0) {
+        BtActStatus.action_gauge = kGaugeFull * (1.0f - static_cast<float>(g_shield_broken) / kShieldCooldown);
+        g_shield_gauge = true;
+        return;
+    }
+
+    // Handed back full, as a guard ends with the slingshot whole or ready again.
+    if (g_shield_gauge) {
+        g_shield_gauge = false;
+        BtActStatus.action_gauge = kGaugeFull;
+    }
 }
 
 float FlatDistance(const float *a, const float *b) {
@@ -3987,14 +4278,29 @@ void ReflectorStep() {
         }
     }
 
+    ShieldGauge();
+
+    if (g_shield_snap > 0) {
+        g_shield_snap--;
+    }
+
     // What was caught goes back out, one at a time, at the nearest enemy.
     if (g_reflect_ready > 0) {
         g_reflect_ready--;
     }
 
     if (g_caught.empty() || g_reflect_ready > 0 || !ReflectorHeld() || NowWeaponHave == nullptr) {
+        g_shield_pull = -1;
         return;
     }
+
+    // Standing, it draws before each shot.
+    if (g_shield_up && ++g_shield_pull < kShieldDrawSteps) {
+        return;
+    }
+
+    g_shield_pull = -1;
+    g_shield_snap = g_shield_up ? kShieldSnapSteps : 0;
 
     CSHOT_EFFECT *from = g_caught.front().from;
     g_caught.erase(g_caught.begin());
@@ -4028,7 +4334,9 @@ void ReflectorStep() {
     }
 
     g_reflect.Fire(origin, direction, NowWeaponHave->attack, CHARA_XIAO);
-    g_reflect_ready = kReflectGap;
+
+    // The draw counts toward the gap, so it fires back as often as before.
+    g_reflect_ready = g_shield_up ? kReflectGap - kShieldDrawSteps : kReflectGap;
 }
 
 /**
@@ -4062,7 +4370,19 @@ void ShieldDraw() {
 
     const float  scale = kShieldScale * static_cast<float>(g_shield_grow) / kShieldGrowSteps;
     const float *at = g_shield_up ? g_shield_pos : g_shield_last;
-    g_shield_model.Draw(at[0], at[1] - g_shield_model.tip * scale * 0.5f, at[2], scale, g_shield_yaw);
+
+    // Its draw: back toward Xiao as it pulls, then past its place a moment as it snaps.
+    float pull = 0.0f;
+
+    if (g_shield_up && g_shield_pull >= 0) {
+        pull = kShieldPull * scale * static_cast<float>(g_shield_pull) / kShieldDrawSteps;
+    } else if (g_shield_up && g_shield_snap > 0) {
+        pull = -0.5f * kShieldPull * scale * static_cast<float>(g_shield_snap) / kShieldSnapSteps;
+    }
+
+    const float x = at[0] - std::sin(g_shield_yaw) * pull;
+    const float z = at[2] - std::cos(g_shield_yaw) * pull;
+    g_shield_model.Draw(x, at[1] - g_shield_model.tip * scale * 0.5f, z, scale, g_shield_yaw);
 }
 
 /**
@@ -4783,6 +5103,59 @@ void ToanSwingStep(float &time) {
     }
 }
 
+/**
+ * Super Steve's shot versions of two sword abilities, each step Xiao is out. Swift Strikes (a
+ * Shamshir, Dusack, 7 Branch Sword, Atlamillia Sword, Chronicle Sword or Partisan sphere): her
+ * draw plays 1.6 times as fast and her shoot at 0.95 frames a step, the fastest that still fires
+ * (Shamshir.cs DriveSphere). Quick Draw (a Small Sword, Tsukikage or Heaven's Cloud sphere): the
+ * gauge between shots refills at once (SmallSwordSphere.cs); the release fires at once through
+ * QuickDrawRelease.
+ */
+void XiaoSphereStep() {
+    struct Swing {
+        int   motion;
+        int   start;
+        int   end;
+        float fast;
+    };
+
+    constexpr std::array<Swing, 2> kShots = {{{11, 240, 251, 0.7f * 1.6f}, {13, 251, 255, 0.95f}}};
+    constexpr float                kStock = 0.7f;
+
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO) {
+        return;
+    }
+
+    const int held = EffectOf(CHARA_XIAO);
+
+    if (QuickDraw(held) && BtActStatus.action_on == 0) {
+        BtActStatus.action_gauge = 100.0f;
+    }
+
+    MOTION_INFO *motions = CharaMain.motion_type.motion_info;
+
+    if (motions == nullptr) {
+        return;
+    }
+
+    const bool swift = SwiftStrikes(held) || held == ITEM_WEAPON_PARTISAN;
+
+    for (const Swing &shot : kShots) {
+        MOTION_INFO &motion = motions[shot.motion];
+
+        // Only Xiao's own shot motions, at a speed this or the game set.
+        if (motion.start != shot.start || motion.end != shot.end) {
+            continue;
+        }
+
+        if (std::fabs(motion.speed - kStock) > 0.01f && std::fabs(motion.speed - shot.fast) > 0.01f) {
+            continue;
+        }
+
+        motion.speed = swift ? shot.fast : kStock;
+    }
+}
+
 int ToanAttack(int attack) {
     // Spring's Blessing: the blessed Kitchen Knife hits twice as hard.
     if (ToanWeapon() == ITEM_WEAPON_KITCHEN_KNIFE && g_knife_bless_steps > 0) {
@@ -5151,6 +5524,7 @@ void DungeonStep() {
         CurseStep(CHARA_XIAO, EffectOf(CHARA_XIAO), g_curse_xiao);
     }
 
+    XiaoSphereStep(); // Dark Cloud Expanded: Super Steve's Swift Strikes and Quick Draw.
     TyphoonStep(held);
     SolarStep(held);
     JudgementStep(held);
@@ -5406,6 +5780,38 @@ float StatusBreakFactor(int item_no) {
     return item_no == ITEM_WEAPON_7BRANCH_SWORD ? kSevenfoldFactor : kVanillaFactor;
 }
 
+namespace {
+
+bool g_sevenfold_refused = false;
+
+} // namespace
+
+bool SevenfoldRefuses(const WEAPON_HAVE &weapon) {
+    g_sevenfold_refused = weapon.item_no == ITEM_WEAPON_7BRANCH_SWORD && weapon.level < kSevenfoldLevel;
+    return g_sevenfold_refused;
+}
+
+bool SevenfoldRefused() {
+    return g_sevenfold_refused;
+}
+
+short *SevenfoldRefusalText(const ClsMes *mes, int line) {
+    // The Status Break result line of the menus' effect window (CWeaponLevelUp::DrawMes).
+    constexpr int kBreakResultLine = 0x191;
+
+    if (!g_sevenfold_refused || mes != &CommonMenuMes1 || line != kBreakResultLine) {
+        return nullptr;
+    }
+
+    static std::vector<s16> codes;
+
+    if (codes.empty()) {
+        text::GameTextEncode("\nStatus Break fails\nbelow level 7.", codes);
+    }
+
+    return reinterpret_cast<short *>(codes.data());
+}
+
 int AbsCap(int max_exp) {
     // Overtraining: while a Macho Sword is owned, anywhere, every weapon keeps absorbing up
     // to twice its max.
@@ -5442,14 +5848,18 @@ void OnKill(const MONSTOR &monster, WEAPON_HAVE *weapon, float *position) {
         weapon->durability_f = std::min(static_cast<float>(weapon->durability), weapon->durability_f + kDeSangaHeal);
     }
 
-    if (RandomItem == nullptr) {
-        return;
+    // Shooting Stars: one kill in fifty puts an empty SynthSphere straight into the bag, as
+    // Expanded does; with no room for an attachment the kill does not roll.
+    CDngStatusData *status = SaveData != nullptr ? SaveData->GetDngStatus() : nullptr;
+
+    if (item == ITEM_WEAPON_STAR_BREAKER && status != nullptr && status->CheckItemGet(ITEM_ATTACH_SYNTHESIS_SPHERE) == 0 &&
+        std::rand() % 50 == 0) {
+        status->GetItem(ITEM_ATTACH_SYNTHESIS_SPHERE, 1);
+        ShowDungeonMessage("The Star Breaker sent\nyou a shooting star!", 3 * kStepsPerSecond);
     }
 
-    // Shooting Stars: one kill in fifty drops an empty SynthSphere.
-    if (item == ITEM_WEAPON_STAR_BREAKER && std::rand() % 50 == 0) {
-        RandomItem->Set(position, 1, -1, ITEM_ATTACH_SYNTHESIS_SPHERE);
-        ShowDungeonMessage("The Star Breaker sent\nyou a shooting star!", 3 * kStepsPerSecond);
+    if (RandomItem == nullptr) {
+        return;
     }
 
     // Solar Harvest: one kill in a hundred drops a Sun attachment.
@@ -5857,6 +6267,128 @@ void ShowDungeonMessage(std::string_view text, int frames) {
     DngMessMan.timer = frames;
 }
 
+namespace {
+
+struct SpeciesName {
+    int              name_no;
+    std::string_view name;
+};
+
+/**
+ * A species' name for the mod's notices, from Dark Cloud Enhanced's enemy list (Enemies.cs), by
+ * MONSTOR::name_no; empty for one not listed.
+ */
+std::string_view SpeciesNameOf(int name_no) {
+    static constexpr SpeciesName kNames[] = {
+        {1, "Master Jacket"},
+        {3, "Skeleton Soldier"},
+        {5, "Statue"},
+        {6, "Dasher"},
+        {7, "Werewolf"},
+        {8, "Fli Fli"},
+        {9, "Hornet"},
+        {10, "Halloween"},
+        {11, "Cannibal Plant"},
+        {12, "Earth Digger"},
+        {14, "Sunday"},
+        {15, "Monday"},
+        {16, "Tuesday"},
+        {17, "Wednesday"},
+        {18, "Thursday"},
+        {19, "Friday"},
+        {20, "Saturday"},
+        {21, "Witch Hellza"},
+        {22, "Witch Illza"},
+        {23, "Gunny"},
+        {24, "Gyon"},
+        {25, "Pirate's Chariot"},
+        {26, "Auntie Medu"},
+        {27, "Captain"},
+        {28, "Corcea"},
+        {30, "Golem"},
+        {31, "Mr. Blare"},
+        {32, "Dune"},
+        {33, "Titan"},
+        {34, "King Mimic"},
+        {35, "Mimic"},
+        {36, "King Mimic"},
+        {37, "Mimic"},
+        {38, "King Mimic"},
+        {39, "Mimic"},
+        {40, "Arthur"},
+        {42, "Ghost"},
+        {43, "Alexander"},
+        {44, "Heart"},
+        {45, "Club"},
+        {46, "Diamond"},
+        {47, "Spade"},
+        {48, "Joker"},
+        {49, "Bomber Head"},
+        {50, "Mummy"},
+        {51, "Lich"},
+        {52, "Curse Dancer"},
+        {54, "Killer Snake"},
+        {55, "Living Armor"},
+        {56, "White Fang"},
+        {57, "Moon Bug"},
+        {58, "Phantom"},
+        {59, "Dragon"},
+        {60, "Cave Bat"},
+        {61, "Evil Bat"},
+        {62, "Hell Pockle"},
+        {63, "Rash Dasher"},
+        {64, "Steel Giant"},
+        {65, "Blizzard"},
+        {66, "Moon Digger"},
+        {67, "Dark Flower"},
+        {68, "Cursed Rose"},
+        {69, "Billy"},
+        {70, "Vulcan"},
+        {71, "Crabby Hermit"},
+        {72, "Space Gyon"},
+        {73, "Blue Dragon"},
+        {74, "Black Dragon"},
+        {75, "Mask of Prajna"},
+        {76, "Crescent Baron"},
+        {77, "Rockanoff"},
+        {78, "King Mimic"},
+        {79, "Mimic"},
+        {80, "King Mimic"},
+        {81, "Mimic"},
+        {82, "King Mimic"},
+        {83, "Mimic"},
+        {121, "Wine Keg"},
+        {221, "Black Knight"},
+        {301, "Yammich"},
+        {303, "Statue Dog"},
+        {304, "Opar"},
+        {305, "Haley Holey"},
+        {306, "King Prickly"},
+        {308, "Nikapous"},
+        {309, "Mimic"},
+        {310, "King Mimic"},
+        {311, "Gemron"},
+        {312, "Gemron"},
+        {313, "Gemron"},
+        {314, "Gemron"},
+        {315, "Gemron"},
+        {316, "Bishop Q"},
+        {317, "Gacious"},
+        {318, "Silver Gear"},
+        {319, "Horn Head"},
+    };
+
+    for (const SpeciesName &entry : kNames) {
+        if (entry.name_no == name_no) {
+            return entry.name;
+        }
+    }
+
+    return {};
+}
+
+} // namespace
+
 void OnSteal(const MONSTOR &monster, int owner) {
     if (!StealsShots(owner)) {
         return;
@@ -5873,7 +6405,12 @@ void OnSteal(const MONSTOR &monster, int owner) {
     }
 
     g_stolen.Build(*source);
-    ShowDungeonMessage("Projectile stolen! Your shots\nare its shots on this floor.", 4 * kStepsPerSecond);
+
+    // As Expanded's notice does, the line names the enemy whose shot it was.
+    const std::string_view name = SpeciesNameOf(monster.name_no);
+    const std::string      notice = name.empty() ? std::string("Projectile stolen! Your shots\nare its shots on this floor.")
+                                                 : std::format("{}'s projectile\nis now yours on this floor.", name);
+    ShowDungeonMessage(notice.c_str(), 4 * kStepsPerSecond);
 }
 
 bool FireStolenShot(const float *origin, const float *direction, int damage, int owner) {
@@ -5900,31 +6437,149 @@ void StolenShotDraw() {
     }
 }
 
-bool XiaoAimStep(bool holding) {
-    const int  held = EffectOf(CHARA_XIAO);
-    const bool charges = held == ITEM_WEAPON_MATADOR || held == ITEM_WEAPON_DRAGON_S_Y || held == ITEM_WEAPON_DIVINEBEASTTITLE;
-    bool       full = false;
+namespace {
 
-    if (holding && charges) {
+/**
+ * Moonlit Focus: Super Steve with a Tsukikage or Heaven's Cloud sphere fires every pellet at
+ * twice its speed.
+ */
+void MoonlitPellet(CSHOT *shots, int slot) {
+    if (shots == nullptr || slot < 0 || slot >= 12 || UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO ||
+        !MoonlitFocus(EffectOf(CHARA_XIAO))) {
+        return;
+    }
+
+    for (int axis = 0; axis < 3; axis++) {
+        shots->vector[slot][axis] *= kMoonlitShotSpeed;
+    }
+}
+
+/**
+ * Heaven's Cloud's wind burst where an empowered pellet struck, share 0 to 1 of the way from the
+ * first stage to the most: every enemy within the blast takes its share of the attack in the
+ * weapon's element and is thrown clear of a point pulled back toward Xiao.
+ */
+void CloudWind(const float *pos, float share) {
+    if (NowMonstorUnit == nullptr || NowWeaponHave == nullptr) {
+        return;
+    }
+
+    const float radius = kCloudWindLeast + (kCloudWindMost - kCloudWindLeast) * share;
+    const float charge = static_cast<float>(kCloudFirstSteps) / kCloudFullSteps + (1.0f - static_cast<float>(kCloudFirstSteps) / kCloudFullSteps) * share;
+    const int   damage = std::max(1, static_cast<int>(std::lround(static_cast<float>(NowWeaponHave->attack) * kCloudWindDamage * charge)));
+
+    float centre[4] = {pos[0], pos[1], pos[2], 1.0f};
+    const float dx = CharaMain.pos[0] - pos[0];
+    const float dz = CharaMain.pos[2] - pos[2];
+    const float away = std::sqrt(dx * dx + dz * dz);
+
+    if (away > 1e-3f) {
+        const float back = std::min(kCloudWindPullback, away);
+        centre[0] += dx / away * back;
+        centre[2] += dz / away * back;
+    }
+
+    for (int m = 0; m < 16; m++) {
+        if (!ActiveMonster(m)) {
+            continue;
+        }
+
+        float at[4];
+        MonsterPosition(m, at);
+
+        if (FlatDistance(at, pos) > radius) {
+            continue;
+        }
+
+        NowColData->Set(at, damage, 1, NowMonstorUnit->monster[m].body_radius + 2.0f, 0.0f, 2, 2, 0, 0);
+
+        auto &hit = NowColData->hit[NowColData->now_hit];
+        hit.vs_monster = NowWeaponHave->vs_monster;
+        hit.weapon_flags = NowWeaponHave->flags;
+        hit.flags = GetWeaponElementAttr(NowWeaponHave->best_elem);
+        hit.owner = CHARA_XIAO;
+        hit.attack_no = 0;
+        NowColData->SetKickBack(centre, kCloudWindKick, kCloudWindDecay, 2);
+    }
+
+    // The wind's look: the summon smoke grown with the charge, and the Wind Gem's sound.
+    constexpr float kWindSmokeLeast = 1.0f;
+    constexpr float kWindSmokeMost = 2.5f;
+
+    fx::Play(fx::Prop::Smoke, 0, centre, kWindSmokeLeast + (kWindSmokeMost - kWindSmokeLeast) * share, RandomYaw());
+    SndSePlay(SE_WIND_GEM, -1, 0);
+}
+
+/**
+ * The steps Xiao holds her shot to charge it with the weapon (or sphere) she carries, or -1 for one
+ * whose shot does not charge.
+ */
+int ShotChargeSteps(int held) {
+    if (held == ITEM_WEAPON_MATADOR || held == ITEM_WEAPON_DRAGON_S_Y || held == ITEM_WEAPON_DIVINEBEASTTITLE) {
+        return kChargeSteps;
+    }
+
+    if (held == ITEM_WEAPON_HEAVEN_S_CLOUD) {
+        return kCloudFirstSteps;
+    }
+
+    if (held == ITEM_WEAPON_MOBIUS_RING) {
+        return kMobiusShotCycle;
+    }
+
+    if (TornadoFormOf(held) != nullptr) {
+        return kTornadoShotSteps;
+    }
+
+    return -1;
+}
+
+} // namespace
+
+bool XiaoAimStep(bool holding) {
+    const int held = EffectOf(CHARA_XIAO);
+    const int need = ShotChargeSteps(held);
+    bool      full = false;
+
+    if (holding && need > 0) {
         if (!g_aim_holding) {
             g_aim_holding = true;
             g_aim_steps = 0;
             g_aim_charged = false;
         }
 
-        if (++g_aim_steps >= kChargeSteps && !g_aim_charged) {
+        g_aim_steps++;
+
+        if (held == ITEM_WEAPON_HEAVEN_S_CLOUD) {
+            // Two stages, each with the game's charge flash.
+            full = g_aim_steps == kCloudFirstSteps || g_aim_steps == kCloudMostSteps;
+            g_aim_charged = g_aim_steps >= kCloudFirstSteps;
+        } else if (held == ITEM_WEAPON_MOBIUS_RING) {
+            // A flash with each step of the ramp, as Ruby's.
+            full = g_aim_steps % kMobiusShotCycle == 0;
+            g_aim_charged = g_aim_steps >= kMobiusShotCycle;
+        } else if (g_aim_steps >= need && !g_aim_charged) {
             g_aim_charged = true;
             full = true;
+        }
+
+        if (full) {
+            setUnitAmbientAnime(15.0f, 1.0f, 0.0f, 122.0f, 208.0f);
         }
     } else if (g_aim_holding) {
         g_aim_holding = false;
         g_charge_armed = g_aim_charged ? kChargeArmSteps : 0;
+        g_charge_hold = g_aim_steps;
         g_aim_charged = false;
     } else if (g_charge_armed > 0) {
         g_charge_armed--;
     }
 
     return full;
+}
+
+bool QuickDrawRelease() {
+    return UserStatus != nullptr && UserStatus->cur_chara == CHARA_XIAO && QuickDraw(EffectOf(CHARA_XIAO));
 }
 
 bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage) {
@@ -5972,6 +6627,39 @@ bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage)
         return true;
     }
 
+    // Super Steve with a sphere of the Halberd line: a charged shot carries the form, flying its
+    // travel faster, drawn its size larger, at 1.5 times the damage.
+    if (const TornadoForm *form = TornadoFormOf(held); charged && form != nullptr) {
+        const float fast[3] = {vector[0] * form->travel, vector[1] * form->travel, vector[2] * form->travel};
+        SpawnPellet(shots, world, fast, strong, form->scale);
+        return true;
+    }
+
+    // Super Steve with a Heaven's Cloud sphere: an empowered shot grows with the hold and bursts
+    // in the wind where it strikes.
+    if (charged && held == ITEM_WEAPON_HEAVEN_S_CLOUD) {
+        const float share =
+            std::clamp(static_cast<float>(g_charge_hold - kCloudFirstSteps) / (kCloudMostSteps - kCloudFirstSteps), 0.0f, 1.0f);
+        const int damage_now = static_cast<int>(std::lround(static_cast<float>(damage) * (1.0f + (kCloudDamageMost - 1.0f) * share)));
+        const int slot = SpawnPellet(shots, world, vector, damage_now, 1.0f + (kCloudPelletMost - 1.0f) * share);
+
+        if (slot >= 0) {
+            g_pellets[slot].wind = share;
+            MoonlitPellet(shots, slot);
+        }
+
+        return true;
+    }
+
+    // Super Steve with a Mobius Ring sphere: x1.5 for each second and a half held, the pellet
+    // growing with it.
+    if (charged && held == ITEM_WEAPON_MOBIUS_RING) {
+        const float times = std::pow(kMobiusShotStep, static_cast<float>(g_charge_hold / kMobiusShotCycle));
+        const int   ramped = static_cast<int>(std::min(static_cast<float>(damage) * times, static_cast<float>(kMobiusShotDamageMost)));
+        SpawnPellet(shots, world, vector, ramped, std::min(times, kMobiusPelletMost));
+        return true;
+    }
+
     // Super Steve with a Sun Sword, Big Bang or Sword of Zeus sphere: a charged shot carries the
     // sword's move to what it hits.
     if (charged && (held == ITEM_WEAPON_SUN_SWORD || held == ITEM_WEAPON_BIG_BANG || held == ITEM_WEAPON_SWORD_OF_ZEUS)) {
@@ -6006,6 +6694,7 @@ bool XiaoShot(CSHOT *shots, const float *world, const float *vector, int damage)
 void OnPelletSpawned(int slot) {
     if (slot >= 0 && slot < 12) {
         g_pellets[slot] = {};
+        MoonlitPellet(NowShotData, slot);
 
         // Super Steve with a Baselard or Claymore sphere: every pellet throws its enemy as the
         // sword's hits do.
@@ -6100,6 +6789,10 @@ void OnPelletHit(CSHOT *shots, int slot, bool monster) {
 
     if (monster && pellet.sword >= 0) {
         SwordShotHit(pellet.sword, pos);
+    }
+
+    if (monster && pellet.wind >= 0.0f) {
+        CloudWind(pos, pellet.wind);
     }
 
     // Ricochet: the Hardshooter's pellets, and Double Impact's, send a second pellet on from
@@ -6283,6 +6976,47 @@ int SkeletonKey(const int *usable) {
     return -1;
 }
 
+void InsuranceLoad() {
+    g_insured.clear();
+    g_insured_notice.clear();
+
+    const dc::quest::Progress *progress = dc::quest::FindProgress(kInsuranceId);
+
+    if (progress == nullptr) {
+        return;
+    }
+
+    const auto value = [&](const std::string &key) {
+        const auto found = progress->vars.find(key);
+        return found != progress->vars.end() ? found->second : 0;
+    };
+
+    const int count = value("count");
+
+    for (int i = 0; i < count; i++) {
+        InsuredSphere insured{};
+        insured.dungeon = value(std::format("{}.dungeon", i));
+        insured.floor = value(std::format("{}.floor", i));
+        insured.box = -1;
+
+        std::array<s32, kInsuranceWords> words{};
+
+        for (int word = 0; word < kInsuranceWords; word++) {
+            words[static_cast<std::size_t>(word)] = value(std::format("{}.w{}", i, word));
+        }
+
+        std::memcpy(&insured.sphere, words.data(), sizeof(ATTACH_LIST));
+
+        if (insured.sphere.item_no == ITEM_ATTACH_SYNTHESIS_SPHERE) {
+            g_insured.push_back(insured);
+        }
+    }
+
+    if (!g_insured.empty()) {
+        std::printf("[Insurance] %d SynthSphere chest(s) waiting from the save\n", static_cast<int>(g_insured.size()));
+    }
+}
+
 void OnWeaponBroke(const WEAPON_HAVE &weapon) {
     if (!Owned(ITEM_WEAPON_ATLAMILLIA_SWORD) || weapon.item_no < 0) {
         return;
@@ -6317,6 +7051,7 @@ void OnWeaponBroke(const WEAPON_HAVE &weapon) {
     }
 
     g_insured.push_back(insured);
+    InsuranceSave();
 
     g_insured_notice = insured.floor >= 0
                            ? std::format("Atlamillia Insurance! A SynthSphere\nof it waits on floor {}.", insured.floor + 1)
@@ -6620,6 +7355,7 @@ void OnAttachmentAdded(int slot) {
 
         *attach = insured->sphere;
         g_insured.erase(insured);
+        InsuranceSave();
         return;
     }
 }
@@ -6635,9 +7371,29 @@ bool GuardianGrace() {
 }
 
 void GraceStep() {
+    static bool guarding = false;
+
     if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO || !GuardianGrace()) {
         g_grace_glow = 0.0f;
+        guarding = false;
         return;
+    }
+
+    // Dark Cloud Expanded: the Angel Shooter's moment plays once as the guard starts, the
+    // healing spring's sparkle with its chime and a gentle white flash.
+    if (!guarding) {
+        guarding = true;
+
+        if (EffectOf(CHARA_XIAO) == ITEM_WEAPON_ANGEL_SHOOTER) {
+            if (HealEffect.active == 0) {
+                float at[4];
+                sceVu0CopyVector(at, CharaMain.pos);
+                HealEffect.Set(at);
+            }
+
+            SndSePlay(SE_CHARA_RECOVER, -1, 0);
+            setUnitAmbientAnime(60.0f, 1.0f, 110.0f, 110.0f, 110.0f);
+        }
     }
 
     float tint[3];
@@ -6813,10 +7569,12 @@ void OnFloorStart() {
     g_typhoon_steps = -1;
     g_solar = Solar::Idle;
     g_solar_blind = 0;
+    g_cower = {};
     g_blast_crush = {};
     g_zeus_chain = false;
     g_zeus_charged = false;
     g_zeus_lunging = false;
+    g_zeus_camera_held = false;
     g_zeus_charge_steps = 0;
     g_wrath = Wrath::Idle;
     g_whp_bill = 0.0f;
@@ -6834,15 +7592,66 @@ void OnFloorStart() {
 }
 
 void DecoyDraw(const float *scene_ambient) {
-    if (!g_mirage_lure.active || UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+    if (!g_mirage_lure.active || !MirageWielder()) {
         return;
     }
 
-    // Fades in over its first half second and out over its last.
-    const int   shown = g_mirage_life - g_mirage_steps;
+    // Dark Cloud Expanded: the copy a new cast replaced dissolves where it stood.
+    if (g_mirage_old_steps > 0 && g_mirage_old.Valid()) {
+        g_mirage_old.Draw(scene_ambient, kMirageAlpha * static_cast<float>(g_mirage_old_steps) / kMirageHandoffSteps);
+    }
+
+    // Fades in over its first half second (after the old copy's dissolve) and out over its last.
+    const int   shown = g_mirage_life - g_mirage_steps - g_mirage_delay;
     const float in = static_cast<float>(shown) / kMirageFadeSteps;
     const float out = static_cast<float>(g_mirage_steps) / kMirageFadeSteps;
     g_mirage_copy.Draw(scene_ambient, kMirageAlpha * std::clamp(std::min(in, out), 0.0f, 1.0f));
+}
+
+void DecoyHaze() {
+    // Dark Cloud Expanded: the decoy stands in a heat shimmer, the game's own haze over a torch
+    // (CFireOmni::DrawRaster), which needs the floor's torch textures.
+    if (!g_mirage_lure.active || !MirageWielder() || NowDngMap == nullptr) {
+        return;
+    }
+
+    static char kBlender[] = "blender";
+    static char kMask[] = "alpha01";
+
+    if (TexManager.GetTexture(kBlender, -1) == nullptr || TexManager.GetTexture(kMask, -1) == nullptr) {
+        return;
+    }
+
+    // Two rasters, at his waist and his shoulders, as one torch's covers only a flame's height.
+    constexpr float kHazeHeights[2] = {4.0f, 14.0f};
+
+    CFireOmni  &fire = NowDngMap->fire;
+    float       saved[4];
+    std::memcpy(saved, fire.pos, sizeof(saved));
+
+    for (const float height : kHazeHeights) {
+        fire.pos[0] = g_mirage_lure.pos[0];
+        fire.pos[1] = g_mirage_lure.pos[1] + height;
+        fire.pos[2] = g_mirage_lure.pos[2];
+        fire.pos[3] = 1.0f;
+        fire.DrawRaster();
+    }
+
+    std::memcpy(fire.pos, saved, sizeof(saved));
+}
+
+void CowerMotion(int m, CCharacter &chara) {
+    if (m < 0 || m >= 16 || !g_cower[static_cast<std::size_t>(m)] || NowMonstorUnit == nullptr) {
+        return;
+    }
+
+    g_cower[static_cast<std::size_t>(m)] = false;
+    const int motion = GuardLoopMotion(NowMonstorUnit->monster[m]);
+
+    // Snapped to the guard's first key and held there while the blindness lasts.
+    if (motion >= 0) {
+        chara.SetMotion(motion, 1 | 4);
+    }
 }
 
 void ColumnDraw() {
