@@ -10,6 +10,7 @@
 
 namespace dc::game {
 
+class CCharacter;
 class CMonstorUnit;
 
 namespace expanded {
@@ -65,6 +66,12 @@ void MinibossStep();
  * Makes Ungaga's doors in the dungeon's event script open for the whole party.
  */
 void PatchUngagaDoors(int dungeon, char *script, int size);
+
+/**
+ * Dark Cloud Enhanced: Ungaga's item throw plays twice as fast, once a party member's dungeon
+ * model is loaded.
+ */
+void UngagaThrowSpeed(int chara, CCharacter &model);
 
 /**
  * Harder enemy AI: once a monster's script is loaded into its kind's slot, raises the revive

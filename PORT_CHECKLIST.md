@@ -1,6 +1,6 @@
 # Dark Cloud Expanded → Chronicle port checklist
 
-Expanded adds up to 172 features. 107 are done, 30 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 8 are to do.
+Expanded adds up to 173 features. 108 are done, 30 are done but partial, 8 were already in Chronicle, 1 needs a check, 5 are skipped, 13 are skipped for now (counted as finished) and 8 are to do.
 
 ## Order of work
 
@@ -9,7 +9,7 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 1. Enhanced, easier: clock in Yellow Drops and Dark Heaven Castle, leave the dungeon from floor select, Repair and Escape Powders as active items, powder stacking, back-floor chest loot, daily shop slot, minibosses on floor entry (all in, untested)
 2. Enhanced weapon effects: Babel's Spear and Angel Gear (Enhanced versions). Hercules' Wrath is already on Expanded's version and stays there; anything already Expanded stays Expanded (both in, untested)
 3. Enhanced quests: monster hunts, Samba's dagger challenge, Mayor's Demon Shaft quest, repeatable fishing quests, Pickle's % completion (all in, untested)
-4. Enhanced, needs the logging build: Ungaga throw speed, Fog Gate cutscene (logging in, waiting on logs)
+4. Enhanced, needs the logging build: Ungaga throw speed (built in chronicle-ungaga-throw.zip, untested), Fog Gate cutscene (logging in, waiting on logs from the playthrough)
 5. Enhanced, hard: play as any ally in town, new town dialogue for every ally (both in, untested)
 6. Expanded zip 1, weapons: built in chronicle-expanded-weapons-1.zip (Babel's Spear, Terra Sword, Cactus Desert Bloom, Angel Gear party heal and Guardian Reflector, Chronicle 2, their menu descriptions). Zip 1b built in chronicle-expanded-weapons-1b.zip (Pockle Call, Spirit Beast, Super Steve's Sphere Inheritance, the last menu descriptions)
 7. Expanded zip 2, dungeons and enemies: miniboss scaling and loot tables, more than five shot types per floor, Ungaga's doors for the whole party, harder enemy AI option (all in, untested)
@@ -68,7 +68,8 @@ Five are done and five were already in Chronicle; the WHP billing row matters mo
 | Weapon effects bill WHP through the game's wear routine | Expanded | Done | Untested; nothing uses it yet. Paid on the next walking step through the game's own wear. Needed by Solar Flash, Big Bang, Zeus, Terra Sword, Hercules' Wrath |
 | Confuse, a new weapon ability | Expanded | Done, partial | Untested. Carried by Babel's Spear. 1 hit in 20 confuses for 20 s, never a boss. A confused enemy chases the nearest enemy or you, and its melee hurts enemies; an enemy it hits fights back. Zip 16: the dizzy stars (gedit/s04/chara/e114ex.chr) spin over the 6 confused enemies nearest you, and a confused enemy's shots hurt enemies too. Zip 17: its own icon, Expanded's art painted into the empty tile beside Steal as the menu's icon sheet loads (console line [Effects] when it paints). Works differently: friendly-fire kills may still give ABS |
 | Empty SynthSphere raises a weapon to +5 while socketed | Code only | Done | Untested. First hole only. Taking it out while the weapon is still +5 undoes it; a level-up makes the levels permanent |
-| Faster Ungaga item throw, shorter Fog Gate cutscene | Enhanced | To do | Waiting on logs. Throw speed: Enhanced changes a "22" to "44" in Ungaga's dungeon file (c10b.chr, info.cfg); the logging build saves that file to logs/. Fog Gate: the dark-fog door on Divine Beast Cave floor 9 runs a dungeon system script; logs/events.txt records its number and length, logs/d02_event.stb is the script file |
+| Faster Ungaga item throw | Enhanced | Done | Untested. Zip 18: Ungaga's throw (motion 27, frames 186 to 206) plays at 0.44 instead of 0.22, set on the loaded model each time his dungeon model loads (any of the three load paths go through LoadChara2). Same change as Enhanced's "22" to "44" in c10b.chr's config and Expanded's CheckSwap; the motion comes from Expanded's docs/character-motion-table.md. The console prints [UngagaThrow] with the old and new speed, or what it found if the motion isn't the vanilla one |
+| Shorter Fog Gate cutscene | Enhanced | To do | Waiting on logs. The dark-fog door on Divine Beast Cave floor 9 runs a dungeon system script; logs/events.txt records its number and length, logs/d02_event.stb is the script file. Enhanced's change isn't in its public source |
 | Broken Dagger attachment glitch fixed | Enhanced | Done | Shop work buffer now cleared; Broken Dagger fix zip |
 | Out of Bounds menu glitch fixed | Enhanced | Skip | Expanded has no code for it; the shop buffer fix is its only shop glitch fix |
 | Flapping Duster can spawn in Gallery of Time | Enhanced | Check | Gallery's chest lists hold it 3 times at normal odds; confirm in a playthrough |

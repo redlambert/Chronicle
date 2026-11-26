@@ -12,6 +12,7 @@
 #include <string_view>
 #include <vector>
 
+#include "character.hpp"
 #include "dataalloc.hpp"
 #include "dngstatusdata.hpp"
 #include "dun/gameloop.hpp"
@@ -1146,6 +1147,35 @@ void PatchUngagaDoors(int dungeon, char *script, int size) {
     script[at + 0x4A4] = 30;
     script[at + 0x474] = 30;
     std::println("[UngagaDoors] d0{}: doors fixed at 0x{:X}", dungeon + 1, at);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ungaga's throw speed (Dark Cloud Enhanced's pnach "change throw speed"; Expanded's
+// Dungeon/UngagaDoors.cs CheckSwap does the same)
+// ---------------------------------------------------------------------------------------------
+
+void UngagaThrowSpeed(int chara, CCharacter &model) {
+    // Both mods turn the "0.22" of the throw's KEY line in c10b.chr's config into "0.44". That
+    // line is motion 27, frames 186 to 206 (Expanded's docs/character-motion-table.md).
+    static constexpr int   kThrowMotion = 27;
+    static constexpr int   kThrowStart = 186;
+    static constexpr int   kThrowEnd = 206;
+    static constexpr float kVanillaSpeed = 0.22f;
+    static constexpr float kFastSpeed = 0.44f;
+
+    if (chara != CHARA_UNGAGA || model.motion_type.motion_info == nullptr) {
+        return;
+    }
+
+    MOTION_INFO &info = model.motion_type.motion_info[kThrowMotion];
+
+    if (info.start != kThrowStart || info.end != kThrowEnd || std::fabs(info.speed - kVanillaSpeed) > 0.001f) {
+        std::println("[UngagaThrow] motion {} is {}-{} at {}, left alone", kThrowMotion, info.start, info.end, info.speed);
+        return;
+    }
+
+    info.speed = kFastSpeed;
+    std::println("[UngagaThrow] throw speed {} -> {}", kVanillaSpeed, kFastSpeed);
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "expanded_effects.hpp"
+#include "expanded_enemies.hpp"
 #include "expanded_weapons.hpp"
 #include "dun/gameloop.hpp"
 
@@ -3651,6 +3652,8 @@ void LoadChara2(int chara, int keep_place, unsigned int *chara_data, unsigned in
 
     CharaMain.InitializeTexAnime(CharaMainTexAnim, 64);
     CharaMain.LoadPackData2(chara_data, "base.cfg", &CharaModelBuffer, 0x11, &CharaModelBuffer, 0);
+    // Dark Cloud Enhanced: Ungaga throws items twice as fast.
+    expanded::UngagaThrowSpeed(chara, CharaMain);
     NowWeapon = nullptr;
     CharaHand.Initialize();
 
