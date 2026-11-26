@@ -17,7 +17,29 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 9. Expanded zip 4, towns: party menu switch sequence, allies fishing, ally ladder climbs, full town animation sets, overhead Georama camera and fast run (all in, untested)
 10. Expanded zip 5, the missing weapon effects: every visual left out of the weapon rows (dimming, tints, glows, smoke, lightning, judgement blade, explosion, Dark Genie beam, the cat's wings and cape, the Reflector's animation and fades), the gameplay pieces with them (Big Bang's explosion immunity, Cactus and Babel's Spear blocking shots, enemies attacking the Reflector, Confuse's stars, icon and projectile friendly fire, Super Steve's Xiao shot versions of Toan's moves), plus attack voices only, the stuck-landing fix and Toan's name swapped in the ally lines (built in chronicle-weapon-visuals.zip, untested; the file dump is taken out again)
 11. Partials cleanup: the Fairy King's Crystal Eyeball, the fountains off for Samba's challenge, the heart in the ally lines, Xiao's lower talk camera, Atlamillia Insurance kept with the save, Star Breaker's sphere into the bag, the 7 Branch Sword's break cut off mid-animation, the enemy named in the steal notice, Confuse's own icon, the light blue Babel beam, the small visuals (rock and cactus shadows, Angel Shooter sparkle, judgement blade glow disc, Cactus overshoot and fade, Mirage shimmer and dissolve, Zeus's camera hold, cowering from the Sun Sword, the Reflector's gauge and draw), Super Steve's shot versions of the sword moves and the Mirage, Enhanced's miniboss stamina (built in chronicle-partials.zip, untested). Left for after the playthrough: the Divine Beast cat's wings, mask and cape, the Double Impact and Matador pellet looks; Xiao's guard columns through a sphere, Super Steve's HUD sphere icon and a slingshot sphere's pellet sprite built in chronicle-super-steve-columns.zip (zip 20, untested)
-12. Then the map changes. New fishing spots, Queens canal tide, Yellow Drops west bank, Queens snake statue, Brownboo cleanup, Brownboo pond rocks, town camera collision
+12. Your full playthrough (planned in a separate chat), then playthrough bug fixes
+13. Then the map changes, in the order below (scoped, nothing built yet)
+
+## Map changes plan (scoped after zip 20)
+
+How Chronicle loads towns: each town's scene.scn is stored as .gltf bundles, but DataReadLoadFile rebuilds the original bytes from them into the load buffer (model_gltf::Splice, byte for byte). So a hook right after the scene, mapinfo.cfg or img.pak loads sees the original format, which is what Expanded's patches are written for. Patches go there, made from Expanded's code at load time; no game data goes into the repo
+
+PAL check: every one of the 28 node names Expanded's map patches look for (e03, e05, s04, s13) is in the PAL files, and so is every vanilla text they search mapinfo.cfg for (Yellow Drops' WATER_SURFACE rows, Queens' water rows and WATER_SHAKE, GROUND). Expanded's patches stop if a vanilla value doesn't match, so a mismatch shows up as a log line rather than a broken town. No NTSC dump needed for now
+
+To check in the first map zip: several patches make the scene bigger (Brownboo's camera hull and rocks, Queens' rebuilt collision and canal cap). The scene loads into EdNPCBuffer with the next town data placed right after it (editloop.cpp), so the first zip logs the room left after each patched scene
+
+Two kinds of work:
+- Data patches on the town files (Expanded's IsoPatch/): node-name and byte edits, rebuilt collision blocks (CollisionGeom, CollisionMdsWriter, SceneBaker) and the generated geometry in IsoPatch/Data/ (QueensCollisionData, BrownbooCollisionData, SceneCollisionData, about 184 KB of C# arrays to turn into C++ data; Expanded is BSD 2-Clause, so keep its notice with them)
+- Game code (Expanded's Elf*Patches, tools/stubs/*.s and Town/), rewritten natively as the weapons were: the town camera (ElfCameraPatches, town_camera_collision.s, camera_norm_side.s, camera_height.s), the canal (ElfCanalPatches, canal_evict_fade_hook.s), water drawing order (ElfWaterPatches, water_order_gate.s), fishing (ElfFishingPatches, FishingSpots.cs, FishingScripts.cs, FishingCatchCamera.cs, fishline_*.s). Town/TownCameraPolyBuffer.cs fixes a PS2 buffer overrun; check whether Chronicle's camera gather has the same fixed 2,000-poly limit
+
+Planned zips:
+1. Brownboo (smallest; proves the load-time patching works): upper crater walls culled, see-through houses and stray corner tris (TownSceneBakes), the camera hull s04g01_v rebuilt and the pond rocks added to the player collision (BrownbooCollision, TownCollisionBakes), plus a test helper that writes your position and the floor height under you to the log
+2. Yellow Drops: water raised to 4.25 (mapinfo WATER_SURFACE rows and the s1302 sheet), the west bank reshaped (YellowDropsWestBank, 519 lines)
+3. Queens ground and structures: rebuilt ground and camera collision (QueensCollision, QueensTerrainRules), georama part swaps (TownScenePartBakes), the climbable snake statue (SnakeStatueCollision)
+4. The Queens canal: tide and its map-jump on the black fade, the ladder carve, the drained floor, the west-end cap, the ripple texture, the waterfall spray, the healing-spring water look (CanalLadderCarve, CanalWestEndCap, CanalRippleTexture, ElfCanalPatches, ElfWaterPatches)
+5. The town camera collision overhaul (ElfCameraPatches and its stubs)
+6. The new fishing spots (Queens, Brownboo, Yellow Drops) with 6 fish per spot (5 at the Oasis), the pool swaps, the line split, per-spot camera heights and casts stopping at the canal walls. Last, since the Queens and Yellow Drops spots sit on the changed maps
+
 
 ## How to read this
 
