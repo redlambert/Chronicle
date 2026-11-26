@@ -620,7 +620,9 @@ constexpr Row kGameRows[] = {
     OnOffRow<&Config::weapon_beep>("game.weapon_beep", "Weapon Beep",
                                    "\"Weapon Beep\"\nBeeps while a weapon\nis about to break."),
     OnOffRow<&Config::harder_enemy_ai>("game.harder_enemy_ai", "Harder Enemy AI",
-                                       "\"Harder Enemy AI\"\nEnemies that can get\nup may revive after\ndeath. Next floor.")
+                                       "\"Harder Enemy AI\"\nEnemies that can get\nup may revive after\ndeath. Next floor."),
+    OnOffRow<&Config::miniboss_stamina>("game.miniboss_stamina", "Miniboss Stamina",
+                                        "\"Miniboss Stamina\"\nMinibosses deal double\ndamage and take half.")
 };
 
 constexpr Row kDisplayRows[] = {

@@ -7195,7 +7195,11 @@ void RandomizeChests(CDungeonMap *map, int floor_no, int main_floor) {
         if (Roll(1000) < item_chance) {
             int item_no = main_floor != 0 ? Pick(items) : Pick(kBackFloorItems);
 
-            if (item_no == ITEM_POWERUP_POWDER && (main_floor == 0 || !chronicle2) && Roll(100) < 80) {
+            // Powerup Powder is rerolled 4 times in 5; with Chronicle 2 on a main floor, 1 in 2 (your
+            // change: Expanded keeps every roll, which hands out too many free weapon levels).
+            const int reroll_chance = main_floor != 0 && chronicle2 ? 50 : 80;
+
+            if (item_no == ITEM_POWERUP_POWDER && Roll(100) < reroll_chance) {
                 item_no = main_floor != 0 ? Pick(items) : Pick(kBackFloorItems);
             }
 

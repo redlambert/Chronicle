@@ -51,6 +51,7 @@ struct Config : HostSettings {
     bool autosave = true;
     bool weapon_beep = true;  /**< Dark Cloud Expanded: the nearly-broken weapon's warning beep. */
     bool harder_enemy_ai = false; /**< Dark Cloud Expanded: monsters with a get-up motion can revive after death. */
+    bool miniboss_stamina = true; /**< Dark Cloud Enhanced: minibosses stay in the stamina state (double damage dealt, half taken). */
     bool music = true;        /**< Dark Cloud Expanded: all music. */
     bool battle_music = true; /**< Dark Cloud Expanded: the dungeon's battle music. */
     bool voices = true;       /**< Dark Cloud Expanded: the characters' voices. */

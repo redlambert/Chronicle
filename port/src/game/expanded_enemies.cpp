@@ -1051,7 +1051,7 @@ void MinibossStep() {
         MONSTOR &monster = NowMonstorUnit->monster[boss.slot];
         boss.alive = monster.state >= 1 && monster.hp > 0;
 
-        if (boss.alive && monster.anger_timer < kAngerLeast) {
+        if (boss.alive && platform::ConfigGet().miniboss_stamina && monster.anger_timer < kAngerLeast) {
             monster.anger_timer = kAngerTopUp;
         }
     }
