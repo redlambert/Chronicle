@@ -1,4 +1,5 @@
 #include "menu_dungeon.hpp"
+#include "expanded_weapons.hpp"
 
 #include <algorithm>
 #include <array>
@@ -2313,6 +2314,8 @@ int DngActiveWeaponTextureCopy() {
         }
     }
 
+    // Dark Cloud Expanded: Super Steve's sphere weapon's icon, for the HUD.
+    expanded::SphereIconCopy();
     return 1;
 }
 

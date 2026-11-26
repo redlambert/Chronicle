@@ -30,7 +30,8 @@ namespace dc::game {
 void CSHOT::draw() {
     for (int shot = 0; shot < 12; shot++) {
         if (used[shot] != 0) {
-            int texture_cell = NowWeaponHave->item_no - 299;
+            // Dark Cloud Expanded: a slingshot's sphere on Super Steve brings its own pellet.
+            int texture_cell = expanded::PelletSpriteItem(NowWeaponHave->item_no) - 299;
             texture_cell--;
 
             texture_cell = std::max(texture_cell, 0);

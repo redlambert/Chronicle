@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -21,6 +22,7 @@
 #include "clsmes.hpp"
 #include "collision.hpp"
 #include "collisiondata.hpp"
+#include "data/data_read.hpp"
 #include "dataread.hpp"
 #include "dngmessageman.hpp"
 #include "dngstatusdata.hpp"
@@ -3351,6 +3353,259 @@ CFrame *RockModel() {
     return g_rock_frame;
 }
 
+// Dark Cloud Expanded: Super Steve's columns borrow two models from the towns. Each is read once
+// a session (the file's model and texture copied out, the rest let go) and its texture entered
+// again on each floor, in a block of its own past the item models' (0x38 to 0x3D).
+constexpr int kTreesTextureBlock = 0x3E;
+constexpr int kNutTextureBlock = 0x3F;
+
+struct BorrowedModel {
+    std::vector<u_long128> mds;        // the model file, kept: the frames point into it
+    std::vector<u_long128> arena;      // what LoadMDSFile builds the frames in
+    std::vector<u_long128> image;      // the IMG bank entered on each floor
+    CDataAlloc2<1>         alloc;
+    CFrame                *frame = nullptr;
+    bool                   tried = false;
+    int                    texture_floor = -1;
+};
+
+/**
+ * Builds the model's frames from an MDS copied out of a file.
+ */
+void BuildBorrowed(BorrowedModel &model, const std::uint8_t *mds, std::size_t mds_size, std::size_t arena_bytes) {
+    model.mds.assign((mds_size + 15) / 16, u_long128{});
+    std::memcpy(model.mds.data(), mds, mds_size);
+    model.arena.assign(arena_bytes / 16, u_long128{});
+    model.alloc.base = reinterpret_cast<u_char *>(model.arena.data());
+    model.alloc.used = 0;
+    model.alloc.limit = static_cast<int>(arena_bytes / 16);
+    model.frame = LoadMDSFile(reinterpret_cast<u_int *>(model.mds.data()), &model.alloc, 0, nullptr, nullptr);
+}
+
+/**
+ * Keeps the bank as one IMG holding only the named picture (a town bank holds many).
+ */
+bool KeepPicture(BorrowedModel &model, const std::uint8_t *bank, std::size_t bank_size, std::string_view picture) {
+    if (bank_size < sizeof(IMG_head)) {
+        return false;
+    }
+
+    const auto *head = reinterpret_cast<const IMG_head *>(bank);
+    const auto *entries = reinterpret_cast<const IMG_entry *>(head + 1);
+    const u_int count = head->pictures;
+
+    if (sizeof(IMG_head) + count * sizeof(IMG_entry) > bank_size) {
+        return false;
+    }
+
+    for (u_int i = 0; i < count; i++) {
+        if (std::string_view(entries[i].name, strnlen(entries[i].name, sizeof(entries[i].name))) != picture) {
+            continue;
+        }
+
+        // The picture runs to the next one's start, or the bank's end.
+        std::size_t end = bank_size;
+
+        for (u_int j = 0; j < count; j++) {
+            if (entries[j].offset > entries[i].offset && entries[j].offset < end) {
+                end = entries[j].offset;
+            }
+        }
+
+        if (entries[i].offset >= end) {
+            return false;
+        }
+
+        constexpr std::size_t kHead = sizeof(IMG_head) + sizeof(IMG_entry);
+        const std::size_t     size = end - entries[i].offset;
+        model.image.assign((kHead + size + 15) / 16, u_long128{});
+        auto *out = reinterpret_cast<std::uint8_t *>(model.image.data());
+        IMG_head  one_head = *head;
+        IMG_entry one = entries[i];
+        one_head.pictures = 1;
+        one.offset = kHead;
+        std::memcpy(out, &one_head, sizeof(one_head));
+        std::memcpy(out + sizeof(IMG_head), &one, sizeof(one));
+        std::memcpy(out + kHead, bank + entries[i].offset, size);
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * The dungeon's texture blocks are rebuilt on a floor change, so the picture goes back in.
+ */
+void EnterBorrowedTexture(BorrowedModel &model, int block) {
+    if (model.frame == nullptr || model.image.empty() || UserStatus == nullptr) {
+        return;
+    }
+
+    const int floor = UserStatus->cur_floor + 100 * selectMapNo;
+
+    if (model.texture_floor != floor) {
+        TexManager.DeleteTextureBlock(block);
+        TexManager.EnterIMGFile(reinterpret_cast<u_char *>(model.image.data()), block, 0, 0);
+        model.texture_floor = floor;
+    }
+}
+
+/**
+ * Queens' two trees and their grass (Expanded's QueensTrees.cs): the georama part e03t01 of
+ * gedit/e03/scene.scn, its display model (the first of its two MDS blocks) with the grass
+ * square's mesh dropped, and its picture e03b04 from e03b01.img in gedit/e03/img.pak.
+ */
+BorrowedModel g_trees;
+
+CFrame *TreesModel() {
+    if (!g_trees.tried) {
+        g_trees.tried = true;
+        std::vector<std::uint8_t> scene;
+        std::vector<std::uint8_t> pak;
+        const char               *why = nullptr;
+
+        if (!dc::data::DataReadReadFile("gedit/e03/scene.scn", scene) || !dc::data::DataReadReadFile("gedit/e03/img.pak", pak)) {
+            why = "gedit/e03/scene.scn or img.pak not readable";
+        }
+
+        // The scene's sub-file directory: 0x30-byte entries from 0x10, the name, then its
+        // offset and size at +0x10 and +0x14.
+        std::size_t sub = 0;
+        std::size_t sub_size = 0;
+
+        for (std::size_t o = 0x10; why == nullptr && o + 0x30 <= scene.size(); o += 0x30) {
+            const char *name = reinterpret_cast<const char *>(&scene[o]);
+            const auto  length = strnlen(name, 16);
+
+            if (length == 0 || !std::isalnum(static_cast<unsigned char>(name[0]))) {
+                break;
+            }
+
+            if (std::string_view(name, length) == "e03t01") {
+                u_int at = 0;
+                u_int size = 0;
+                std::memcpy(&at, &scene[o + 0x10], 4);
+                std::memcpy(&size, &scene[o + 0x14], 4);
+                sub = at;
+                sub_size = size;
+                break;
+            }
+        }
+
+        if (why == nullptr && (sub == 0 || sub_size == 0 || sub + sub_size > scene.size())) {
+            why = "e03t01 is not in the scene";
+        }
+
+        // Its first two 16-aligned "MDS" blocks: the display model, then the collision model.
+        std::size_t blocks[2] = {0, 0};
+        int         found = 0;
+
+        for (std::size_t p = 0; why == nullptr && p + 4 <= sub_size && found < 2; p += 16) {
+            if (std::memcmp(&scene[sub + p], "MDS\0", 4) == 0) {
+                blocks[found++] = p;
+            }
+        }
+
+        if (why == nullptr && found < 2) {
+            why = "e03t01's model blocks not found";
+        }
+
+        if (why == nullptr) {
+            std::vector<std::uint8_t> mds(scene.begin() + static_cast<std::ptrdiff_t>(sub + blocks[0]),
+                                          scene.begin() + static_cast<std::ptrdiff_t>(sub + blocks[1]));
+
+            // The grass square is textured as Queens' paving: its node's mesh offset (+0x28 of
+            // its 0x70-byte entry; count at +8, table at +0xC) zeroed, every other node kept.
+            u_int count = 0;
+            u_int table = 0;
+            bool  dropped = false;
+            std::memcpy(&count, &mds[8], 4);
+            std::memcpy(&table, &mds[0xC], 4);
+
+            for (u_int i = 0; i < count && table + (i + 1) * 0x70 <= mds.size(); i++) {
+                const char *name = reinterpret_cast<const char *>(&mds[table + i * 0x70 + 8]);
+
+                if (std::string_view(name, strnlen(name, 0x20)) == "grid__a7f") {
+                    std::memset(&mds[table + i * 0x70 + 0x28], 0, 4);
+                    dropped = true;
+                }
+            }
+
+            int    bank_size = 0;
+            char   bank_name[] = "e03b01.img";
+            u_int *bank = GetPackFile(reinterpret_cast<u_int *>(pak.data()), bank_name, &bank_size);
+
+            if (!dropped) {
+                why = "the grass square is not in the model";
+            } else if (bank == nullptr || bank_size <= 0 ||
+                       !KeepPicture(g_trees, reinterpret_cast<const std::uint8_t *>(bank), static_cast<std::size_t>(bank_size), "e03b04")) {
+                why = "e03b04 is not in img.pak's e03b01.img";
+            } else {
+                BuildBorrowed(g_trees, mds.data(), mds.size(), 256 * 1024);
+
+                if (g_trees.frame == nullptr) {
+                    why = "the model did not build";
+                }
+            }
+        }
+
+        if (why != nullptr) {
+            std::printf("[Expanded] Queens trees NOT LOADED: %s\n", why);
+        } else {
+            std::printf("[Expanded] Queens trees loaded\n");
+        }
+    }
+
+    EnterBorrowedTexture(g_trees, kTreesTextureBlock);
+    return g_trees.frame;
+}
+
+/**
+ * The nut (Expanded's KinomiModel.cs): gedit/s04/chara/e114kinomi.chr's e114kinomi.mds and
+ * kinomi.img, as they are.
+ */
+BorrowedModel g_nut;
+
+CFrame *NutModel() {
+    if (!g_nut.tried) {
+        g_nut.tried = true;
+        std::vector<std::uint8_t> pack;
+        const char               *why = nullptr;
+
+        if (!dc::data::DataReadReadFile("gedit/s04/chara/e114kinomi.chr", pack)) {
+            why = "gedit/s04/chara/e114kinomi.chr not readable";
+        } else {
+            int    mds_size = 0;
+            int    img_size = 0;
+            char   mds_name[] = "e114kinomi.mds";
+            char   img_name[] = "kinomi.img";
+            u_int *mds = GetPackFile(reinterpret_cast<u_int *>(pack.data()), mds_name, &mds_size);
+            u_int *img = GetPackFile(reinterpret_cast<u_int *>(pack.data()), img_name, &img_size);
+
+            if (mds == nullptr || img == nullptr || mds_size <= 0 || img_size <= 0) {
+                why = "the pack has no e114kinomi.mds or kinomi.img";
+            } else {
+                g_nut.image.assign((static_cast<std::size_t>(img_size) + 15) / 16, u_long128{});
+                std::memcpy(g_nut.image.data(), img, static_cast<std::size_t>(img_size));
+                BuildBorrowed(g_nut, reinterpret_cast<const std::uint8_t *>(mds), static_cast<std::size_t>(mds_size), 64 * 1024);
+
+                if (g_nut.frame == nullptr) {
+                    why = "the model did not build";
+                }
+            }
+        }
+
+        if (why != nullptr) {
+            std::printf("[Expanded] Super Steve's nut NOT LOADED: %s\n", why);
+        } else {
+            std::printf("[Expanded] Super Steve's nut loaded\n");
+        }
+    }
+
+    EnterBorrowedTexture(g_nut, kNutTextureBlock);
+    return g_nut.frame;
+}
+
 /**
  * One hit on monster m's nearest live hit sphere to (x, z): its damage, a kick from origin, and
  * through any guard when guard_break.
@@ -3429,6 +3684,21 @@ struct Column {
     float      fall_speed = 0.0f;
     bool       falling = false;
     int        weapon_item = -1;
+    // Dark Cloud Expanded: Super Steve's forms (Xiao with a Cactus, Babel's Spear or Terra Sword
+    // sphere): Queens' trees, the statue and the nut.
+    int        wielder = -1;      // the character who raised it
+    float      exposed = 0.0f;    // of the model's length out of the ground, before scaling
+    float      draw_dx = 0.0f;    // the model's root from the column's centre, at 1x
+    float      draw_dz = 0.0f;
+    float      sink = 0.0f;       // the rock and the nut: how far into the ground they rest
+    float      beam_scale = 1.0f; // Babel's beam
+    bool       trees = false;     // Queens' trees: a wall, no spikes, no shadow
+    bool       statue = false;    // Super Steve's statue: its two hands in place of the spikes
+    bool       nut = false;       // the nut: lands on the target's head, bonks and confuses it
+    bool       hopping = false;   // the nut's hop off the head
+    float      hop_x = 0.0f;      // the hop's drift a step
+    float      hop_z = 0.0f;
+    float      hop_y = 0.0f;      // its rise a step
 };
 
 // Babel's Spear "Curse of Babel".
@@ -3468,6 +3738,37 @@ constexpr float kRockSink = 4.0f;
 constexpr int   kRockLifeSteps = 20 * kStepsPerSecond;
 constexpr int   kRockGoneSteps = kStepsPerSecond / 2;
 constexpr float kRockWhp = 10.0f;
+// Super Steve's statue (Expanded's BabelCopy.cs StatueForm): a 4x upright copy of Super Steve,
+// all but its feet out, a solid column of its feet's width; its two hands strike within 6 units
+// for half the attack, one passing every 180 degrees of the 240 degree a second turn (0.75 s).
+constexpr float kStatueScale = 4.0f;
+constexpr float kStatueExposed = 3.94f;
+constexpr float kStatueRadius = 2.0f;
+constexpr float kStatueHandReach = 4.0f;    // past the column: 6 units from its centre
+constexpr float kStatueHandShare = 0.5f;
+constexpr int   kStatueHandSteps = 45;
+constexpr float kStatueBeamScale = 0.7f;
+// Queens' trees (Expanded's Cactus.cs TreesForm): 74.3 tall at 1x, all of it out, at 0.7x; the
+// column covers both trunks; centred on the spot by the grass square's centre (model -6, -1);
+// turned a quarter from the facing. They only block: no spikes, no shadow.
+constexpr float kTreesScale = 0.7f;
+constexpr float kTreesTop = 74.3f;
+constexpr float kTreesRadius = 9.5f;
+constexpr float kTreesCentreX = -6.0f;
+constexpr float kTreesCentreZ = -1.0f;
+constexpr float kTreesTurn = 3.14159265f / 2.0f;
+// Super Steve's nut (Expanded's TerraSword.cs and NutBonk.cs): 2x (radius 3.8), it falls onto the
+// target's head, bonks it for half the attack through any guard and confuses it while the nut
+// stays; it hops off (up 80, sideways 45 units a second, gravity 400) and rests 20 s on the floor.
+constexpr float kNutScale = 2.0f;
+constexpr float kNutRadius = 1.9f * kNutScale;
+constexpr float kNutSink = 0.5f;
+constexpr float kNutBonkShare = 0.5f;
+constexpr float kNutBonkReach = 6.0f;
+constexpr float kNutHopUp = 80.0f / kStepsPerSecond;
+constexpr float kNutHopSide = 45.0f / kStepsPerSecond;
+constexpr float kNutHopGravity = 400.0f / (kStepsPerSecond * kStepsPerSecond);
+constexpr float kNutShade[3] = {-31.0f, -31.0f, -31.0f};   // the rock's darkening, lighter (0.8 for 0.55)
 
 // How they look: the spear's guard charge tints it light blue and the Dark Genie's small beam
 // stands with it (its rise, its loop, its vanish); the Cactus comes up in a puff of smoke; the
@@ -3516,7 +3817,7 @@ float ColumnRoot(const Column &column, bool &solid) {
             }
 
             solid = t > 0.5f;
-            return CopyRoot(column, kBabelExposed, t);
+            return CopyRoot(column, column.exposed, t);
         }
         case ColumnKind::Cactus: {
             // Dark Cloud Expanded: it stands where it rose and fades away (ColumnsDraw), no longer
@@ -3524,21 +3825,22 @@ float ColumnRoot(const Column &column, bool &solid) {
             const float t = static_cast<float>(column.age) / kCactusRiseSteps;
 
             solid = t > 0.5f && column.age <= column.life;
-            return CopyRoot(column, kCactusExposed, t);
+            return CopyRoot(column, column.exposed, t);
         }
         case ColumnKind::Rock: {
-            if (column.falling) {
-                return column.fall_y + kRockRadius;
+            // The nut's root is at its centre, as the rock's is; the nut never blocks.
+            if (column.falling || column.hopping) {
+                return column.fall_y + (column.nut ? kNutRadius / kNutScale * column.scale : column.radius);
             }
 
             float sink = 0.0f;
 
-            if (column.age > column.life) {
-                sink = 2.0f * kRockRadius * static_cast<float>(column.age - column.life) / column.gone;
+            if (column.age > column.life && !column.nut) {
+                sink = 2.0f * column.radius * static_cast<float>(column.age - column.life) / column.gone;
             }
 
-            solid = sink < kRockRadius;
-            return column.ground + kRockRadius - kRockSink - sink;
+            solid = !column.nut && sink < column.radius;
+            return column.ground + column.radius - column.sink - sink;
         }
     }
 
@@ -3565,6 +3867,7 @@ void ColumnEnd(Column &column) {
     column.model.root = nullptr;
     column.target = -1;
     column.falling = false;
+    column.hopping = false;
 }
 
 void ColumnsReset() {
@@ -3629,9 +3932,13 @@ void RaiseCopy(Column &column, int held, float scale, float radius, int life, in
     column.struck = false;
     column.yaw = CharaMain.rotation.y;
     column.weapon_item = held;
+    column.draw_dx = 0.0f;
+    column.draw_dz = 0.0f;
+    column.trees = false;
+    column.statue = false;
 }
 
-void RaiseBabel(int held) {
+void RaiseBabel(int held, int wielder) {
     Column &column = g_babel;
     column.target = ColumnTarget(kBabelNoLockReach);
 
@@ -3646,21 +3953,75 @@ void RaiseBabel(int held) {
         column.ground = CharaMain.pos[1];
     }
 
-    RaiseCopy(column, held, kBabelScale, kBabelRadius, kBabelLifeSteps, kBabelGoneSteps);
+    // Super Steve's sphere raises a statue of Super Steve in the spear's place.
+    const bool statue = wielder == CHARA_XIAO;
+    RaiseCopy(column, held, statue ? kStatueScale : kBabelScale, statue ? kStatueRadius : kBabelRadius, kBabelLifeSteps,
+              kBabelGoneSteps);
+    column.wielder = wielder;
+    column.statue = statue;
+    column.exposed = statue ? kStatueExposed : kBabelExposed;
+    column.beam_scale = statue ? kStatueBeamScale : kBeamScale;
     setUnitAmbientAnime(15.0f, 1.0f, 12.0f, 50.0f, 84.0f);
 
     if (column.up) {
         const float at[4] = {column.x, column.ground, column.z, 1.0f};
         fx::End(g_babel_beam);
-        g_babel_beam = fx::Play(fx::Prop::Beam, kBeamRise, at, kBeamScale, 0.0f);
+        g_babel_beam = fx::Play(fx::Prop::Beam, kBeamRise, at, column.beam_scale, 0.0f);
     }
 }
 
-void RaiseCactus(int held) {
+void RaiseTrees(int held, int wielder) {
+    CFrame *frame = TreesModel();
+
+    if (frame == nullptr) {
+        return;
+    }
+
+    Column &column = g_cactus;
+    Ahead(kCactusAhead, column.x, column.z);
+    column.ground = CharaMain.pos[1];
+    column.up = true;
+    column.model = {};
+    column.model.root = frame;
+    column.model.block = kTreesTextureBlock;
+    column.model.tip = kTreesTop;
+    column.scale = kTreesScale;
+    column.radius = kTreesRadius;
+    column.life = kCactusLifeSteps;
+    column.gone = kCactusGoneSteps;
+    column.age = 0;
+    column.next_hit = 0;
+    column.struck = false;
+    column.weapon_item = held;
+    column.wielder = wielder;
+    column.trees = true;
+    column.statue = false;
+    column.exposed = kTreesTop;
+    column.yaw = std::remainder(CharaMain.rotation.y + kTreesTurn, 2.0f * 3.14159265f);
+
+    // The model's root, so the grass square's centre lands on the spot.
+    const float c = std::cos(column.yaw);
+    const float s = std::sin(column.yaw);
+    column.draw_dx = -(c * kTreesCentreX + s * kTreesCentreZ);
+    column.draw_dz = -(-s * kTreesCentreX + c * kTreesCentreZ);
+
+    const float at[4] = {column.x, column.ground, column.z, 1.0f};
+    fx::Play(fx::Prop::Smoke, 0, at, kSmokeScale, CharaMain.rotation.y, false, kSmokeRate);
+}
+
+void RaiseCactus(int held, int wielder) {
+    // Super Steve's sphere raises Queens' trees instead.
+    if (wielder == CHARA_XIAO) {
+        RaiseTrees(held, wielder);
+        return;
+    }
+
     Column &column = g_cactus;
     Ahead(kCactusAhead, column.x, column.z);
     column.ground = CharaMain.pos[1];
     RaiseCopy(column, held, kCactusScale, kCactusRadius, kCactusLifeSteps, kCactusGoneSteps);
+    column.wielder = wielder;
+    column.exposed = kCactusExposed;
 
     if (column.up) {
         const float at[4] = {column.x, column.ground, column.z, 1.0f};
@@ -3668,8 +4029,10 @@ void RaiseCactus(int held) {
     }
 }
 
-void DropRock(int target, int held) {
-    CFrame *frame = RockModel();
+void DropRock(int target, int held, int wielder) {
+    // Super Steve's sphere drops the nut instead, onto the target's head.
+    const bool nut = wielder == CHARA_XIAO;
+    CFrame    *frame = nut ? NutModel() : RockModel();
 
     if (frame == nullptr) {
         return;
@@ -3681,11 +4044,15 @@ void DropRock(int target, int held) {
     column.up = true;
     column.model = {};
     column.model.root = frame;
-    column.model.block = kRockTextureBlock;
+    column.model.block = nut ? kNutTextureBlock : kRockTextureBlock;
+    column.wielder = wielder;
+    column.nut = nut;
+    column.hopping = false;
+    column.sink = nut ? kNutSink : kRockSink;
     column.x = at[0];
     column.z = at[2];
     column.ground = at[1];
-    column.radius = kRockRadius;
+    column.radius = nut ? kNutRadius : kRockRadius;
     column.scale = 1.0f;
     column.yaw = static_cast<float>(std::rand() % 628) / 100.0f;
     column.target = target;
@@ -3702,12 +4069,12 @@ void DropRock(int target, int held) {
 /**
  * The spikes: a hit on every enemy touching the column, from its centre, once every interval.
  */
-void Spikes(Column &column, float share, float reach, float kick, float top) {
+void Spikes(Column &column, float share, float reach, float kick, float top, int interval = kSpikeSteps) {
     if (column.age < column.next_hit) {
         return;
     }
 
-    column.next_hit = column.age + kSpikeSteps;
+    column.next_hit = column.age + interval;
     const int   damage = static_cast<int>(std::lround(WeaponAttack() * share));
     const float origin[4] = {column.x, column.ground, column.z, 1.0f};
 
@@ -3757,7 +4124,13 @@ void BabelStep() {
 
     if (column.age >= kBabelRiseSteps && column.age <= column.life) {
         column.yaw += kBabelSpin;
-        Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + kBabelExposed * column.scale);
+
+        if (column.statue) {
+            Spikes(column, kStatueHandShare, kStatueHandReach, kSpikeKick, column.ground + column.exposed * column.scale,
+                   kStatueHandSteps);
+        } else {
+            Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + column.exposed * column.scale);
+        }
     }
 
     // The beam rises with it, stands looping while it stands, and vanishes as it sinks.
@@ -3786,13 +4159,113 @@ void CactusStep() {
         return;
     }
 
-    if (column.age >= kCactusRiseSteps && column.age <= column.life) {
-        Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + kCactusExposed * column.scale);
+    if (column.age >= kCactusRiseSteps && column.age <= column.life && !column.trees) {
+        Spikes(column, kSpikeShare, kSpikeReach, kSpikeKick, column.ground + column.exposed * column.scale);
+    }
+}
+
+/**
+ * Super Steve's nut: it falls onto the target's head, bonks it and hops off to rest on the floor.
+ * The enemy stays confused while the nut stays.
+ */
+void NutStep() {
+    Column &column = g_rock;
+    const bool on_target = column.target >= 0 && ActiveMonster(column.target);
+
+    if (column.falling) {
+        float head = column.ground;
+
+        if (on_target) {
+            float at[4];
+            float top[4];
+            MonsterPosition(column.target, at);
+            MonsterTop(column.target, top);
+            column.x = at[0];
+            column.z = at[2];
+            column.ground = at[1];
+            head = top[1];
+            fx::MonsterTint(column.target, kNutShade, 2);
+        }
+
+        column.fall_speed += kRockGravity;
+        column.fall_y -= column.fall_speed;
+        const float dropped = column.ground + kRockDrop - column.fall_y;
+        column.scale = std::clamp(dropped / kRockGrowDrop, 0.01f, 1.0f) * kNutScale;
+
+        if (column.fall_y > head) {
+            return;
+        }
+
+        column.falling = false;
+        column.scale = kNutScale;
+
+        if (!on_target) {
+            // It missed: it simply comes to rest.
+            column.target = -1;
+            column.age = 0;
+            return;
+        }
+
+        // The bonk: half the attack through any guard, with a plain blow's kick from the player.
+        const float origin[4] = {CharaMain.pos[0], CharaMain.pos[1], CharaMain.pos[2], 1.0f};
+        const int   damage = std::max(1, static_cast<int>(std::lround(WeaponAttack() * kNutBonkShare)));
+        PlantHitNear(column.target, column.x, column.z, kNutBonkReach, damage, origin, kSpikeKick, true);
+
+        // The hop off the head, away from the player.
+        float dx = column.x - CharaMain.pos[0];
+        float dz = column.z - CharaMain.pos[2];
+        const float length = std::sqrt(dx * dx + dz * dz);
+
+        if (length > 0.01f) {
+            dx /= length;
+            dz /= length;
+        } else {
+            dx = std::sin(CharaMain.rotation.y);
+            dz = std::cos(CharaMain.rotation.y);
+        }
+
+        column.hopping = true;
+        column.hop_x = dx * kNutHopSide;
+        column.hop_z = dz * kNutHopSide;
+        column.hop_y = kNutHopUp;
+        column.fall_y = head;
+        std::printf("[Expanded] Super Steve's nut bonks enemy %d for %d\n", column.target, damage);
+        return;
+    }
+
+    // The bonked enemy stays confused while the nut stays.
+    if (column.target >= 0 && ActiveMonster(column.target)) {
+        g_confused_until[column.target] = std::max(g_confused_until[column.target], g_step_count + 2);
+    }
+
+    if (column.hopping) {
+        column.x += column.hop_x;
+        column.z += column.hop_z;
+        column.fall_y += column.hop_y;
+        column.hop_y -= kNutHopGravity;
+
+        if (column.hop_y < 0.0f && column.fall_y <= column.ground - column.sink) {
+            column.hopping = false;
+            column.age = 0;
+        }
+
+        return;
+    }
+
+    column.age++;
+
+    if (column.age > column.life + column.gone) {
+        ColumnEnd(column);
     }
 }
 
 void RockStep() {
     Column &column = g_rock;
+
+    if (column.nut) {
+        NutStep();
+        return;
+    }
 
     if (column.falling) {
         // It follows the enemy down until it lands.
@@ -3868,13 +4341,33 @@ void RockStep() {
     }
 }
 
-void ColumnsStep() {
-    const int  held = HeldBy(CHARA_UNGAGA);
-    const bool ungaga_out = UserStatus->cur_chara == CHARA_UNGAGA;
+/**
+ * Who can raise a column: Ungaga with his weapon, or Xiao with Super Steve (its sphere names the
+ * effect); -1 for anyone else.
+ */
+int ColumnWielder() {
+    const int chara = UserStatus->cur_chara;
 
-    // Each goes with its weapon leaving Ungaga's hand or Ungaga leaving the field.
+    if (chara == CHARA_UNGAGA) {
+        return CHARA_UNGAGA;
+    }
+
+    if (chara == CHARA_XIAO && HeldBy(CHARA_XIAO) == ITEM_WEAPON_SUPER_STEVE) {
+        return CHARA_XIAO;
+    }
+
+    return -1;
+}
+
+void ColumnsStep() {
+    const int  wielder = ColumnWielder();
+    const int  held = wielder >= 0 ? EffectOf(wielder) : -1;
+    const bool ungaga_out = wielder >= 0;
+
+    // Each goes with its weapon (or sphere) leaving the hand or its wielder leaving the field.
     for (Column *column : {&g_babel, &g_cactus, &g_rock}) {
-        if (column->up && (!ungaga_out || held != column->weapon_item || (column->model.weapon && !column->model.Valid()))) {
+        if (column->up && (column->wielder != wielder || held != column->weapon_item ||
+                           (column->model.weapon && !column->model.Valid()))) {
             ColumnEnd(*column);
         }
     }
@@ -3891,13 +4384,13 @@ void ColumnsStep() {
 
         if (held == ITEM_WEAPON_CACTUS && g_column_guard >= kCactusGuardSteps) {
             g_column_cast = true;
-            RaiseCactus(held);
+            RaiseCactus(held, wielder);
         } else if (held == ITEM_WEAPON_BABEL_S_SPEAR && !g_babel.up && g_column_guard >= kBabelGuardSteps) {
             g_column_cast = true;
-            RaiseBabel(held);
+            RaiseBabel(held, wielder);
         } else if (held == ITEM_WEAPON_TERRA_SWORD && !g_rock.up && g_column_guard >= kRockGuardSteps) {
             g_column_cast = true;
-            g_rock_primed = RockModel() != nullptr;
+            g_rock_primed = (wielder == CHARA_XIAO ? NutModel() : RockModel()) != nullptr;
             setUnitAmbientAnime(15.0f, 1.0f, 80.0f, 150.0f, 20.0f);
         }
     }
@@ -3925,7 +4418,7 @@ void ColumnsStep() {
 
         if (target >= 0) {
             g_rock_primed = false;
-            DropRock(target, held);
+            DropRock(target, held, wielder);
         }
     }
 
@@ -3975,15 +4468,15 @@ void ColumnShadow(const Column &column, float scale) {
 
         float share = 1.0f;
 
-        if (column.falling) {
+        if (column.falling || column.hopping) {
             share = std::clamp(1.0f - (column.fall_y - column.ground) / kShadowGrowDrop, kShadowLeast, 1.0f);
         }
 
-        fx::GroundShadow(column.x, column.ground, column.z, share * kRockRadius, kShadowDarkness);
+        fx::GroundShadow(column.x, column.ground, column.z, share * column.radius, kShadowDarkness);
         return;
     }
 
-    if (column.kind == ColumnKind::Cactus) {
+    if (column.kind == ColumnKind::Cactus && !column.trees) {
         // The cactus's body, its arms and spikes left out, as Expanded's.
         constexpr float kCactusShadow = 1.8f;
 
@@ -3992,7 +4485,7 @@ void ColumnShadow(const Column &column, float scale) {
 }
 
 void ColumnsDraw() {
-    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_UNGAGA) {
+    if (UserStatus == nullptr || ColumnWielder() < 0) {
         return;
     }
 
@@ -4020,8 +4513,21 @@ void ColumnsDraw() {
             }
         }
 
+        // The nut fades away where it rests, as the cactus does.
+        if (column->nut && !column->falling && !column->hopping && column->age > column->life) {
+            alpha = 1.0f - static_cast<float>(column->age - column->life) / column->gone;
+        }
+
+        // The borrowed models' pictures go back in after a floor change.
+        if (column->trees) {
+            TreesModel();
+        } else if (column->nut) {
+            NutModel();
+        }
+
         ColumnShadow(*column, scale);
-        column->model.Draw(column->x, root, column->z, scale, column->yaw, false, alpha);
+        column->model.Draw(column->x + column->draw_dx * scale, root, column->z + column->draw_dz * scale, scale, column->yaw, false,
+                           alpha);
     }
 }
 
@@ -5216,6 +5722,102 @@ int EffectOf(int chara) {
     }
 
     return held;
+}
+
+// Super Steve's sphere on show (Expanded's SuperSteve.cs DriveSphereIcon and DriveSphereSprite):
+// the sphere weapon's icon over Steve on the dungeon HUD, and a slingshot sphere's own pellet.
+// The icon is copied into a spare cell of the HUD sheet (itempack, which stays all floor) each
+// time the game copies the equipped weapon's there, and drawn 20 across just above Steve's
+// raised hands, fading with the HUD.
+constexpr int kSphereIconCellX = 64;   // blank in the art and outside every copy the game makes
+constexpr int kSphereIconCellY = 32;
+constexpr int kSphereIconX = 0x1D;     // Steve's own icon is at (0x1D, 0x1A4), 32 across
+constexpr int kSphereIconY = 0x1A4 - 21;
+constexpr int kSphereIconSize = 20;
+
+int g_icon_sphere = -1;    // the sphere whose icon is in the cell now
+int g_pellet_sphere = -1;  // the sphere the pellet sprite was last logged for
+
+/**
+ * The sphere on the weapon Xiao has equipped, when she is out with Super Steve; else -1.
+ */
+int EquippedSphere() {
+    if (UserStatus == nullptr || UserStatus->cur_chara != CHARA_XIAO) {
+        return -1;
+    }
+
+    const int slot = UserStatus->equipped_weapon_slot[CHARA_XIAO];
+
+    if (slot < 0 || slot >= 11) {
+        return -1;
+    }
+
+    return SphereWeapon(&UserStatus->chara_weapons[CHARA_XIAO][slot]);
+}
+
+void SphereIconCopy() {
+    const int sphere = EquippedSphere();
+
+    if (sphere <= 0) {
+        g_icon_sphere = -1;
+        return;
+    }
+
+    const COM_ITEM_INFO *info = GetCommonItemInfo(sphere);
+    char                 source[] = "wepicon";
+    char                 target[] = "itempack";
+
+    // The icon sheet is only there while the game copies from it.
+    if (info == nullptr || info->icon_index < 0 || TexManager.GetTexture(source, -1) == nullptr ||
+        TexManager.GetTexture(target, -1) == nullptr) {
+        return;
+    }
+
+    const int icon = info->icon_index;
+    setItemToReserved(source, (icon % 8) * 32, (icon >> 3) * 32, target, kSphereIconCellX, kSphereIconCellY);
+
+    if (g_icon_sphere != sphere) {
+        std::printf("[SuperSteve] sphere icon: weapon %d (icon %d)\n", sphere, icon);
+    }
+
+    g_icon_sphere = sphere;
+}
+
+void SphereIconDraw(int alpha) {
+    // Only the icon copied for the sphere she has on now.
+    if (g_icon_sphere <= 0 || EquippedSphere() != g_icon_sphere) {
+        return;
+    }
+
+    char      name[] = "itempack";
+    CTexture *icons = TexManager.GetTexture(name, -1);
+
+    if (icons == nullptr) {
+        return;
+    }
+
+    set2DSprite(Vif1Packet, icons, CRect_i_(kSphereIconX, kSphereIconY, kSphereIconSize, kSphereIconSize),
+                CRect_i_(kSphereIconCellX, kSphereIconCellY, 0x20, 0x20), static_cast<unsigned char>(alpha));
+}
+
+int PelletSpriteItem(int item_no) {
+    if (item_no != ITEM_WEAPON_SUPER_STEVE) {
+        return item_no;
+    }
+
+    // A slingshot's sphere brings its pellet: the sheet has one cell a slingshot.
+    const int  sphere = SphereWeapon(NowWeaponHave);
+    const bool slingshot = sphere >= ITEM_WEAPON_WOODEN_SLINGSHOT && sphere <= ITEM_WEAPON_ANGE_GEAR;
+
+    if (sphere != g_pellet_sphere) {
+        g_pellet_sphere = sphere;
+
+        if (slingshot) {
+            std::printf("[SuperSteve] pellet sprite: the sphere weapon's (item %d)\n", sphere);
+        }
+    }
+
+    return slingshot ? sphere : item_no;
 }
 
 void UngagaSwingStep() {

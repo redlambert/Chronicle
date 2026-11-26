@@ -164,6 +164,23 @@ int SphereWeapon(const WEAPON_HAVE *weapon);
 int EffectOf(int chara);
 
 /**
+ * Dark Cloud Expanded: copies the sphere weapon's icon into the HUD sheet's spare cell, when Xiao
+ * is out with a sphere on Super Steve. Called each time the game copies the equipped weapon's.
+ */
+void SphereIconCopy();
+
+/**
+ * Dark Cloud Expanded: draws that icon over Steve on the dungeon HUD, at the HUD's alpha.
+ */
+void SphereIconDraw(int alpha);
+
+/**
+ * Dark Cloud Expanded: the weapon whose cell of the pellet sheet a player pellet is drawn from: a
+ * slingshot's sphere on Super Steve brings its own; else the weapon itself.
+ */
+int PelletSpriteItem(int item_no);
+
+/**
  * Partisan: Ungaga's three combo swings play a third faster. Called each step of his swings.
  */
 void UngagaSwingStep();

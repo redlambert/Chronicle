@@ -740,6 +740,9 @@ void topStatusInfo(int y, int selected_item, int floor) {
     }
 
     set2DSprite(Vif1Packet, icons, CRect_i_(0x1D, 0x1A4, 0x20, 0x20), CRect_i_(u, v, 0x20, 0x20), alpha);
+
+    // Dark Cloud Expanded: the icon of Super Steve's sphere weapon, over Steve.
+    expanded::SphereIconDraw(alpha);
 }
 
 int StatusErrCheck(int status) {
