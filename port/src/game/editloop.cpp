@@ -89,6 +89,7 @@
 #include "weaponlevelup.hpp"
 #include "wind.hpp"
 #include "enhanced_town.hpp"
+#include "expanded_town_maps.hpp"
 
 namespace dc::game {
 
@@ -1295,6 +1296,9 @@ int EditLoop() {
 
     // Dark Cloud Enhanced: the ally picked in the party menu takes over from Toan.
     expanded::TownAllyStep();
+
+    // Test hook (--where): R3 logs where you stand and the floor under you.
+    expanded::TownWhereStep();
 
     // Pausing is a walking action: an event must not open the pause menu, which reads state only
     // valid outside an event, over itself.
@@ -4843,6 +4847,10 @@ void LoadGroundData() {
     if (LoadFile2(scene_path.data(), scn_data, &scene_size, 0) == 0) {
         scn_data = nullptr;
         scene_size = 0;
+    } else {
+        // Dark Cloud Expanded: its map changes, made from the scene as read (Brownboo for now).
+        const std::size_t room = static_cast<std::size_t>(EdNPCBuffer.limit - EdNPCBuffer.used) * 16;
+        expanded::TownSceneLoaded(EditMapName, scn_data, &scene_size, room);
     }
 
     if (scn_data != nullptr) {

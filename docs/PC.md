@@ -104,6 +104,7 @@ a language the data lacks, and its English button reads as the disc's art does.
 | `--jump MODE[:MAP]` | test hook: start in a mode (see "Test hooks"); also `DC_JUMP` |
 | `--fast-load` | test hook: loading-screen holds and fades of a few ticks; also `DC_FAST_LOAD=1` |
 | `--give ITEM,...` | test hook: items and weapons the party is given when a town or dungeon starts (see "Test hooks"); also `DC_GIVE` |
+| `--where` | test hook: in a town, R3 writes your position and the floor under you to `logs/where.txt` (see "Test hooks") |
 | `--display-per-tick N` | headless test aid: render N interpolated display frames per tick (offscreen, not presented) before presenting the tick's canonical image |
 | `--show-fps` | draw the FPS counter when headless too (a headless run leaves `show_fps` off) |
 | `--perf-log` | print tick, render-thread, GPU-timestamp and present timings once a second (see [Switch](SWITCH.md#performance-measurement)) |
@@ -593,6 +594,11 @@ For tests and debugging only; nothing the game does depends on them.
   would: an item into the dungeon inventory, a weapon to the character it
   belongs to. One already held is skipped. `--give 210,211` gives the Sun and
   Moon Signets. A bad list exits with status 2.
+- `--where`: while walking a town, pressing R3 (the right stick) appends a line
+  to `logs/where.txt` in the save folder: the map, your position, the height of
+  the player collision straight below you (or `none`) and the ground grid's
+  height there. For checking Dark Cloud Expanded's map changes, such as
+  standing on Brownboo's pond rocks.
 
 `darkcloud --headless --jump dungeon:0 --fast-load --frames 60` shows the first
 dungeon's floor select after about five seconds on lavapipe.

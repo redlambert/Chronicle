@@ -1,6 +1,6 @@
 # Dark Cloud Expanded → Chronicle port checklist
 
-Expanded adds up to 173 features. 106 are done, 31 are done but partial, 8 were already in Chronicle, 1 needs a check, 6 are skipped, 13 are skipped for now (counted as finished) and 8 are to do.
+Expanded adds up to 173 features. 108 are done, 31 are done but partial, 8 were already in Chronicle, 1 needs a check, 6 are skipped, 13 are skipped for now (counted as finished) and 6 are to do.
 
 ## Order of work
 
@@ -18,7 +18,7 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 10. Expanded zip 5, the missing weapon effects: every visual left out of the weapon rows (dimming, tints, glows, smoke, lightning, judgement blade, explosion, Dark Genie beam, the cat's wings and cape, the Reflector's animation and fades), the gameplay pieces with them (Big Bang's explosion immunity, Cactus and Babel's Spear blocking shots, enemies attacking the Reflector, Confuse's stars, icon and projectile friendly fire, Super Steve's Xiao shot versions of Toan's moves), plus attack voices only, the stuck-landing fix and Toan's name swapped in the ally lines (built in chronicle-weapon-visuals.zip, untested; the file dump is taken out again)
 11. Partials cleanup: the Fairy King's Crystal Eyeball, the fountains off for Samba's challenge, the heart in the ally lines, Xiao's lower talk camera, Atlamillia Insurance kept with the save, Star Breaker's sphere into the bag, the 7 Branch Sword's break cut off mid-animation, the enemy named in the steal notice, Confuse's own icon, the light blue Babel beam, the small visuals (rock and cactus shadows, Angel Shooter sparkle, judgement blade glow disc, Cactus overshoot and fade, Mirage shimmer and dissolve, Zeus's camera hold, cowering from the Sun Sword, the Reflector's gauge and draw), Super Steve's shot versions of the sword moves and the Mirage, Enhanced's miniboss stamina (built in chronicle-partials.zip, untested). Left for after the playthrough: the Divine Beast cat's wings, mask and cape, the Double Impact and Matador pellet looks; Xiao's guard columns through a sphere, Super Steve's HUD sphere icon and a slingshot sphere's pellet sprite built in chronicle-super-steve-columns.zip (zip 20, untested)
 12. Your full playthrough (planned in a separate chat), then playthrough bug fixes
-13. Then the map changes, in the order below (scoped, nothing built yet)
+13. Then the map changes, in the order below (zip 1, Brownboo, built in chronicle-map-brownboo.zip, untested)
 
 ## Map changes plan (scoped after zip 20)
 
@@ -33,7 +33,7 @@ Two kinds of work:
 - Game code (Expanded's Elf*Patches, tools/stubs/*.s and Town/), rewritten natively as the weapons were: the town camera (ElfCameraPatches, town_camera_collision.s, camera_norm_side.s, camera_height.s), the canal (ElfCanalPatches, canal_evict_fade_hook.s), water drawing order (ElfWaterPatches, water_order_gate.s), fishing (ElfFishingPatches, FishingSpots.cs, FishingScripts.cs, FishingCatchCamera.cs, fishline_*.s). Town/TownCameraPolyBuffer.cs fixes a PS2 buffer overrun; check whether Chronicle's camera gather has the same fixed 2,000-poly limit
 
 Planned zips:
-1. Brownboo (smallest; proves the load-time patching works): upper crater walls culled, see-through houses and stray corner tris (TownSceneBakes), the camera hull s04g01_v rebuilt and the pond rocks added to the player collision (BrownbooCollision, TownCollisionBakes), plus a test helper that writes your position and the floor height under you to the log
+1. Built in chronicle-map-brownboo.zip, untested. Brownboo (smallest; proves the load-time patching works): upper crater walls culled, see-through houses and stray corner tris (TownSceneBakes), the camera hull s04g01_v rebuilt and the pond rocks added to the player collision (BrownbooCollision, TownCollisionBakes), plus a test helper that writes your position and the floor height under you to the log
 2. Yellow Drops: water raised to 4.25 (mapinfo WATER_SURFACE rows and the s1302 sheet), the west bank reshaped (YellowDropsWestBank, 519 lines)
 3. Queens ground and structures: rebuilt ground and camera collision (QueensCollision, QueensTerrainRules), georama part swaps (TownScenePartBakes), the climbable snake statue (SnakeStatueCollision)
 4. The Queens canal: tide and its map-jump on the black fade, the ladder carve, the drained floor, the west-end cap, the ripple texture, the waterfall spray, the healing-spring water look (CanalLadderCarve, CanalWestEndCap, CanalRippleTexture, ElfCanalPatches, ElfWaterPatches)
@@ -223,7 +223,7 @@ Every effect is done and waiting on your test; the Mardan swords are under Fishi
 
 ## Fishing
 
-Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, the Yellow Drops bank, the Brownboo rocks).
+Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, the Yellow Drops bank). The Brownboo rocks are in map zip 1, untested.
 
 | Feature | From | Status | Notes |
 | --- | --- | --- | --- |
@@ -231,7 +231,7 @@ Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, 
 | Queens canal tide, ladder and drained canal floor | Expanded | To do | Hard |
 | Yellow Drops west bank reshaped | Expanded | To do | Hard |
 | Casting and line fixes, camera centered on the bobber | Expanded | Done, partial | Untested. The camera watches the float, not the point between you and the float, and goes back to its distance and turn after a catch instead of staying close in. A float above the water only spoils the cast once it stops moving, so long casts still in the air land. Fish catch walls on their +Z side as on the others. Left out (they go with the new fishing spots): the line split above and below the float, the per-spot camera heights, casts stopping at the Queens canal walls |
-| Brownboo pond rocks have collision | Expanded | To do |  |
+| Brownboo pond rocks have collision | Expanded | Done | Untested. Map zip 1: Expanded's three simplified pond rocks are added to Brownboo's player collision (s04g01_a) when the scene loads. Check with --where: R3 on a rock logs the floor under you |
 | Fishing quest tracking for Pike, Pao, Sam and Devia | Expanded | Done | Untested. Already counted by the Enhanced fishing quests (zip 4). New: Sam's special reward. After three of his quests, you can see the fish in the Queens Sea while fishing there, and he reminds you how many are left |
 | Fish steer toward you at Matataki Waterfall and East Harbor | Expanded | Done | Untested. Every 10 s each fish there turns toward you |
 | Mardan swords rework (Eins, Twei, Arise) | Expanded | Done | Untested. Counts in any bag or storage. Fishing Points x1.2 (Eins), x1.5 (Twei), x2 (Arise), Garayans excepted. Twei and Arise give every other fish a second Garayan roll at the spot's own rare odds for the time of day, 1 in 5 of them Baron, at every spot as in Expanded. All three turn Garayans and Umadakaras toward you every 4, 3 or 2 s, divided by how much they like the bait on the hook. Arise scales sizes toward twice the largest. Console logs "[Mardan]" |
@@ -254,7 +254,7 @@ Playing as allies in town is in, with their full animation sets and ladder moves
 | Allies can fish | Expanded | Done | Untested. The fishing session runs as Toan (it loads Toan's fishing model, as in Expanded), and the ally comes back once you're walking again. town.txt in logs/ notes each return |
 | Town camera collision overhaul | Expanded | To do | Hard |
 | Queens snake statue is climbable | Expanded | To do |  |
-| Brownboo cleanup: edit view, see-through houses | Expanded | To do |  |
+| Brownboo cleanup: edit view, see-through houses | Expanded | Done | Untested. Map zip 1: the upper crater walls and the houses are drawn single-sided, the crater rings' and floors' stray corner triangles are gone, and the camera collision (s04g01_v) is rebuilt with the iwa01 tunnel rock's smooth hull. Made from the scene each time Brownboo loads; each part checks the vanilla bytes first and is skipped with a [TownMap] line in town.txt if they don't match |
 | Overhead Georama camera and fast run in every town | Expanded | Done, partial | Untested. Select opens the overhead camera on every town map. Holding Square doubles your walking speed anywhere in town, except while fishing. Leaving the overhead camera still snaps you to the ground. Works differently: outside the five Georama towns the overhead camera can't open the Georama menu, since there's nothing to build there. Left out: the developers' debug jump, which Expanded switches on by accident with the fast run |
 | Clock and time in Yellow Drops and Dark Heaven Castle | Enhanced | Done | Untested. Yellow Drops (map 23) and Dark Heaven Castle (38, 40) skip their map script's time stop, so the clock shows and time runs there as in other towns |
 | Town music starts earlier in the day | Enhanced | Done | Untested. Music comes back at 9:00 instead of 11:00 (Enhanced pnach, EdSetBgmVol) |

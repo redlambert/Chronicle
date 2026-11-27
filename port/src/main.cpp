@@ -35,6 +35,7 @@
 #include "audio/soundtrack.hpp"
 #include "battle_globals.hpp"
 #include "dun/gameloop.hpp"
+#include "expanded_town_maps.hpp"
 #include "gamemode.hpp"
 #include "gfx/gfx.hpp"
 #include "item/host.hpp"
@@ -86,6 +87,7 @@ struct Options {
     int          display_per_tick = 0;
     const char  *jump = nullptr;
     const char  *give = nullptr;
+    bool         where = false;
     bool         fast_load = false;
     bool         show_fps = false;
     bool         screenshot_fps = false;
@@ -116,7 +118,7 @@ float g_switch_render_scale = 0.0f;
                  "          [--display-per-tick N]"
 #endif
                  " [--show-fps] [--jump MODE[:MAP]] [--fast-load]\n"
-                 "          [--give ITEM,...]\n"
+                 "          [--give ITEM,...] [--where]\n"
                  "  --data DIR         extracted game data or its sibling data.zip (default: DC_DATA,\n"
                  "                     then ./data, then data/ beside the executable)\n"
                  "  --save DIR         saves, config.json and the pipeline cache (default: DC_SAVE, then\n"
@@ -149,7 +151,9 @@ float g_switch_render_scale = 0.0f;
                  "                     skipping the warm-up (DC_JUMP); see docs/PC.md\n"
                  "  --fast-load        loading-screen holds and fades of a few ticks (DC_FAST_LOAD=1)\n"
                  "  --give ITEM,...    give the party these item and weapon numbers when a town or dungeon\n"
-                 "                     starts, unless it holds them (DC_GIVE); see docs/PC.md\n",
+                 "                     starts, unless it holds them (DC_GIVE); see docs/PC.md\n"
+                 "  --where            in town, R3 writes your position and the floor under you to\n"
+                 "                     logs/where.txt\n",
                  program);
 #ifdef __SWITCH__
     std::fprintf(stderr, "  --switch-core-affinity separate|auto  pin game and render to separate cores "
@@ -199,6 +203,8 @@ Options ParseOptions(int argc, const char **argv) {
             options.jump = value();
         } else if (arg == "--give") {
             options.give = value();
+        } else if (arg == "--where") {
+            options.where = true;
         } else if (arg == "--fast-load") {
             options.fast_load = true;
         } else if (arg == "--export-text") {
@@ -569,6 +575,7 @@ int Run(int argc, const char **argv) {
         std::fprintf(stderr, "bad --give: %s\n", options.give);
         std::exit(kExitUsage);
     }
+    dc::game::expanded::TownWhereEnable(options.where);
     if (options.jump != nullptr && *options.jump != '\0' && !GameSetJump(options.jump)) {
         std::fprintf(stderr, "bad --jump: %s\n", options.jump);
         std::exit(kExitUsage);
