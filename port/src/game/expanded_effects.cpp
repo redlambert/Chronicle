@@ -80,6 +80,11 @@ struct PropModel {
 
 std::array<PropModel, static_cast<int>(Prop::Count)> g_props;
 
+// The prop whose pack is being entered right now, or -1. PaintTexture keys the beam's recolour on
+// this rather than on the texture block alone: blocks 0x32 to 0x37 are free in the dungeons but
+// not in town, where the windmill's NPC (the Mayor) and the other villagers load into 0x36 and up.
+int g_entering_prop = -1;
+
 int FloorKey() {
     return UserStatus != nullptr ? UserStatus->cur_floor + 100 * selectMapNo : -1;
 }
@@ -140,7 +145,9 @@ bool Ready(int index) {
     prop.alloc.used = 0;
     prop.alloc.limit = kModelBytes / 16;
     prop.source.Initialize();
+    g_entering_prop = index;
     prop.source.LoadPackData3(pack, config, &prop.alloc, block, &prop.alloc, 1, 0x10);
+    g_entering_prop = -1;
 
     if (prop.source.frame == nullptr) {
         std::printf("[Effects] %s model FAILED\n", spec.path);
@@ -862,7 +869,9 @@ void PaintTexture(const char *name, int block, render::PortDecodedTexture &textu
         return;
     }
 
-    if (block == kFirstBlock + static_cast<int>(Prop::Beam)) {
+    // Only the beam prop's own pack. Town villagers share block 0x36 and would come out with red
+    // and green swapped at 0.3 opacity (the green, see-through Mayor).
+    if (g_entering_prop == static_cast<int>(Prop::Beam) && block == kFirstBlock + g_entering_prop) {
         RecolourBeam(texture);
     }
 }

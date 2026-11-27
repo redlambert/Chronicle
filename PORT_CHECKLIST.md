@@ -294,3 +294,10 @@ Most are small; the dev tools are skipped since they were only for building the 
 | Sandbox tab: spawn roster editor, Fish Data Farmer | Expanded | Skip | Tools for building the mod |
 | Dev mode tabs, code cave scanner, TAS, test weapon grant | Code only | Skip | Tools for building the mod |
 | Options saved inside the save file | Expanded | Skip | Chronicle keeps options in config.json |
+
+## Playthrough bug fixes
+
+| Bug | Status | Notes |
+| --- | --- | --- |
+| Mayor green and see-through in the windmill | Fixed, untested | The Babel's Spear beam recolour (red and green swapped, 0.3 opacity) ran on every texture entered into block 0x36. The effect props use 0x32 to 0x37 because no dungeon does, but town villagers load into 0x36 and up, so the first villager (the Mayor) got the beam's look. The recolour now runs only while the beam prop's own pack is loading (expanded_effects.cpp) |
+| Cave Bat with green wings and a pink body (Divine Beast Cave 1) | To check | Not the beam recolour: enemies load into block 42. Waiting on whether the bat was a miniboss and how it looks in vanilla |
