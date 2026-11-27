@@ -12,13 +12,28 @@
  * - the stray corner triangles of the crater rings and floors removed
  * - the camera collision s04g01_v rebuilt: the terrain hull plus obj56 with the iwa01 tunnel rock
  *   swapped for its smooth hull
- * - the three pond rocks added to the player collision s04g01_a */
+ * - the three pond rocks added to the player collision s04g01_a
+ *
+ * Yellow Drops (gedit/s13, Expanded's TownSceneBakes and YellowDropsWestBank):
+ * - the water raised from 0 to 4.25: the WATER_SURFACE plane and the suimenn sheet (s1302)
+ * - the west bank bulged west by up to 70, rebuilt in s1301: the grid10 and grid11 meshes, the
+ *   crown wall and floor (s1301_a), the camera wall (s1301_c), the factory's camera ring
+ *   (doumu_c) pulled in, and camera hulls for the two torii-gate pillars */
 
 #include "common.h"
 
 #include <cstddef>
 
+namespace dc::game {
+struct EDIT_MAP_INFO;
+}
+
 namespace dc::game::expanded {
+
+/**
+ * LoadEditMapData has read a town's mapinfo: the parsed values Expanded changes are changed.
+ */
+void TownMapInfoLoaded(const char *map_name, EDIT_MAP_INFO *info);
 
 /**
  * EditInit has read a town's scene.scn into `scene` (`*size` bytes, `capacity` bytes of room).

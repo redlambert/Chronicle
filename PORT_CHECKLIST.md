@@ -1,6 +1,6 @@
 # Dark Cloud Expanded → Chronicle port checklist
 
-Expanded adds up to 173 features. 108 are done, 31 are done but partial, 8 were already in Chronicle, 1 needs a check, 6 are skipped, 13 are skipped for now (counted as finished) and 6 are to do.
+Expanded adds up to 173 features. 109 are done, 31 are done but partial, 8 were already in Chronicle, 1 needs a check, 6 are skipped, 13 are skipped for now (counted as finished) and 5 are to do.
 
 ## Order of work
 
@@ -18,7 +18,7 @@ Enhanced features come first, Expanded features second. Where an effect exists i
 10. Expanded zip 5, the missing weapon effects: every visual left out of the weapon rows (dimming, tints, glows, smoke, lightning, judgement blade, explosion, Dark Genie beam, the cat's wings and cape, the Reflector's animation and fades), the gameplay pieces with them (Big Bang's explosion immunity, Cactus and Babel's Spear blocking shots, enemies attacking the Reflector, Confuse's stars, icon and projectile friendly fire, Super Steve's Xiao shot versions of Toan's moves), plus attack voices only, the stuck-landing fix and Toan's name swapped in the ally lines (built in chronicle-weapon-visuals.zip, untested; the file dump is taken out again)
 11. Partials cleanup: the Fairy King's Crystal Eyeball, the fountains off for Samba's challenge, the heart in the ally lines, Xiao's lower talk camera, Atlamillia Insurance kept with the save, Star Breaker's sphere into the bag, the 7 Branch Sword's break cut off mid-animation, the enemy named in the steal notice, Confuse's own icon, the light blue Babel beam, the small visuals (rock and cactus shadows, Angel Shooter sparkle, judgement blade glow disc, Cactus overshoot and fade, Mirage shimmer and dissolve, Zeus's camera hold, cowering from the Sun Sword, the Reflector's gauge and draw), Super Steve's shot versions of the sword moves and the Mirage, Enhanced's miniboss stamina (built in chronicle-partials.zip, untested). Left for after the playthrough: the Divine Beast cat's wings, mask and cape, the Double Impact and Matador pellet looks; Xiao's guard columns through a sphere, Super Steve's HUD sphere icon and a slingshot sphere's pellet sprite built in chronicle-super-steve-columns.zip (zip 20, untested)
 12. Your full playthrough (planned in a separate chat), then playthrough bug fixes
-13. Then the map changes, in the order below (zip 1, Brownboo, built in chronicle-map-brownboo.zip, untested)
+13. Then the map changes, in the order below (zip 1, Brownboo, built in chronicle-map-brownboo.zip; zip 2, Yellow Drops, built in chronicle-map-yellow-drops.zip; both untested)
 
 ## Map changes plan (scoped after zip 20)
 
@@ -34,7 +34,7 @@ Two kinds of work:
 
 Planned zips:
 1. Built in chronicle-map-brownboo.zip, untested. Brownboo (smallest; proves the load-time patching works): upper crater walls culled, see-through houses and stray corner tris (TownSceneBakes), the camera hull s04g01_v rebuilt and the pond rocks added to the player collision (BrownbooCollision, TownCollisionBakes), plus a test helper that writes your position and the floor height under you to the log
-2. Yellow Drops: water raised to 4.25 (mapinfo WATER_SURFACE rows and the s1302 sheet), the west bank reshaped (YellowDropsWestBank, 519 lines)
+2. Built in chronicle-map-yellow-drops.zip, untested. Yellow Drops: water raised to 4.25 (mapinfo WATER_SURFACE rows and the s1302 sheet), the west bank reshaped (YellowDropsWestBank, 519 lines)
 3. Queens ground and structures: rebuilt ground and camera collision (QueensCollision, QueensTerrainRules), georama part swaps (TownScenePartBakes), the climbable snake statue (SnakeStatueCollision)
 4. The Queens canal: tide and its map-jump on the black fade, the ladder carve, the drained floor, the west-end cap, the ripple texture, the waterfall spray, the healing-spring water look (CanalLadderCarve, CanalWestEndCap, CanalRippleTexture, ElfCanalPatches, ElfWaterPatches)
 5. The town camera collision overhaul (ElfCameraPatches and its stubs)
@@ -223,13 +223,13 @@ Every effect is done and waiting on your test; the Mardan swords are under Fishi
 
 ## Fishing
 
-Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide, the Yellow Drops bank). The Brownboo rocks are in map zip 1, untested.
+Zip 3 is in, untested; what's left is the map work (new spots, the Queens tide). The Brownboo rocks (map zip 1) and the Yellow Drops bank (map zip 2) are in, untested.
 
 | Feature | From | Status | Notes |
 | --- | --- | --- | --- |
 | New fishing spots: Queens, Brownboo, Yellow Drops | Expanded | To do | Hard. Goes with it: Expanded's 6 fish per spot (5 at the Oasis), and its pool tweaks at Matataki Waterfall (Gummy becomes Niler) and East Harbor (Piccoly becomes Gobbler) |
 | Queens canal tide, ladder and drained canal floor | Expanded | To do | Hard |
-| Yellow Drops west bank reshaped | Expanded | To do | Hard |
+| Yellow Drops west bank reshaped | Expanded | Done | Untested. Map zip 2: the water goes from 0 up to 4.25 (the WATER_SURFACE plane and the suimenn sheet), and the west bank bulges west by up to 70, rebuilt in s1301: the grid10 and grid11 meshes, the crown wall and floor, the camera wall, the factory's camera ring pulled in, and camera hulls for the two torii-gate pillars. Made when Yellow Drops loads, each part checking the vanilla data first. Works differently: Expanded's block offsets are fixed to the USA s1301; here they come from the part's own record, checked to lay out the same way. Goes with the new fishing spots: the fish walls along the new waterline and spot 23's water height |
 | Casting and line fixes, camera centered on the bobber | Expanded | Done, partial | Untested. The camera watches the float, not the point between you and the float, and goes back to its distance and turn after a catch instead of staying close in. A float above the water only spoils the cast once it stops moving, so long casts still in the air land. Fish catch walls on their +Z side as on the others. Left out (they go with the new fishing spots): the line split above and below the float, the per-spot camera heights, casts stopping at the Queens canal walls |
 | Brownboo pond rocks have collision | Expanded | Done | Untested. Map zip 1: Expanded's three simplified pond rocks are added to Brownboo's player collision (s04g01_a) when the scene loads. Check with --where: R3 on a rock logs the floor under you |
 | Fishing quest tracking for Pike, Pao, Sam and Devia | Expanded | Done | Untested. Already counted by the Enhanced fishing quests (zip 4). New: Sam's special reward. After three of his quests, you can see the fish in the Queens Sea while fishing there, and he reminds you how many are left |

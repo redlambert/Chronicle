@@ -931,6 +931,8 @@ int EditInit(void * /*param*/) {
 
     if (interior_test == 0) {
         LoadEditMapData(EditMapInfo, map_path.data(), MapNo);
+        // Dark Cloud Expanded: its map changes to the parsed mapinfo (Yellow Drops' water).
+        expanded::TownMapInfoLoaded(EditMapName, EditMapInfo);
     } else {
         LoadEditMapData(EditMapInfo, "gedit/interior/mapinfo.cfg", MapNo);
         LoadFile("gedit/interior/interior.cfg", read_buffer, &size);
@@ -4848,7 +4850,7 @@ void LoadGroundData() {
         scn_data = nullptr;
         scene_size = 0;
     } else {
-        // Dark Cloud Expanded: its map changes, made from the scene as read (Brownboo for now).
+        // Dark Cloud Expanded: its map changes, made from the scene as read (Brownboo, Yellow Drops).
         const std::size_t room = static_cast<std::size_t>(EdNPCBuffer.limit - EdNPCBuffer.used) * 16;
         expanded::TownSceneLoaded(EditMapName, scn_data, &scene_size, room);
     }
