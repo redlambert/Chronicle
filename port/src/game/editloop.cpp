@@ -4850,7 +4850,7 @@ void LoadGroundData() {
         scn_data = nullptr;
         scene_size = 0;
     } else {
-        // Dark Cloud Expanded: its map changes, made from the scene as read (Brownboo, Yellow Drops).
+        // Dark Cloud Expanded: its map changes, made from the scene as read (Brownboo, Yellow Drops, Queens).
         const std::size_t room = static_cast<std::size_t>(EdNPCBuffer.limit - EdNPCBuffer.used) * 16;
         expanded::TownSceneLoaded(EditMapName, scn_data, &scene_size, room);
     }

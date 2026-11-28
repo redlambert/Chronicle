@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -12,10 +13,12 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numbers>
 #include <numeric>
+#include <optional>
 #include <set>
 #include <span>
 #include <stdexcept>
@@ -256,6 +259,19 @@ std::int64_t Step(double x, double scale) {
     return static_cast<std::int64_t>(std::nearbyint(x * scale));
 }
 
+// ExactMath.Round: Python's round(x, nd), on the double's exact value with ties to even. to_chars
+// rounds that way, so its decimal string read back is the same double. (+0.0 folds -0 into 0.)
+double ExactRound(double x, int nd) {
+    char buf[64];
+    auto [end, ec] = std::to_chars(buf, buf + sizeof buf, x, std::chars_format::fixed, nd);
+    if (ec != std::errc{}) {
+        return x;
+    }
+    double out = x;
+    std::from_chars(buf, end, out);
+    return out + 0.0;
+}
+
 // CollisionGeom.TriKeyRounded(t, 1): the three corners to a tenth, sorted, so winding doesn't count.
 using TriKey = std::array<std::int64_t, 9>;
 
@@ -341,15 +357,17 @@ std::vector<Tri> ParseCollisionMdt(const Bytes &scn, std::size_t mdt) {
 
 // CollisionMdt.Build (no colour block): vertices merged on their 3-decimal rounding, one display
 // list record per triangle.
-Bytes BuildCollisionMdt(const std::vector<Tri> &tris, double y_shift = 0.0) {
-    std::map<std::array<std::int64_t, 3>, std::uint32_t> index;
-    std::vector<Vec>                                     verts;
-    std::vector<std::array<std::uint32_t, 3>>            idx;
+// CollisionMdt.Build: vertices merged on their 3-decimal rounding, one display list record per
+// triangle; with `attrs`, each triangle's 16-byte colour entry (deduplicated) in a colour block.
+Bytes BuildCollisionMdt(const std::vector<Tri> &tris, double y_shift = 0.0, const std::vector<Bytes> *attrs = nullptr) {
+    std::map<std::array<double, 3>, std::uint32_t> index;
+    std::vector<Vec>                               verts;
+    std::vector<std::array<std::uint32_t, 3>>      idx;
     for (const Tri &t : tris) {
         std::array<std::uint32_t, 3> tri{};
         for (int k = 0; k < 3; k++) {
             const Vec                   p = {t[k][0], t[k][1] + y_shift, t[k][2]};
-            std::array<std::int64_t, 3> key = {Step(p[0], 1000.0), Step(p[1], 1000.0), Step(p[2], 1000.0)};
+            const std::array<double, 3> key = {ExactRound(p[0], 3), ExactRound(p[1], 3), ExactRound(p[2], 3)};
             auto [it, inserted] = index.try_emplace(key, static_cast<std::uint32_t>(verts.size()));
             if (inserted) {
                 verts.push_back(p);
@@ -358,14 +376,36 @@ Bytes BuildCollisionMdt(const std::vector<Tri> &tris, double y_shift = 0.0) {
         }
         idx.push_back(tri);
     }
-    const std::size_t   vc = verts.size(), tc = idx.size(), pos = 0x40;
-    const std::size_t   dl = Align16(pos + vc * 16);
-    const std::size_t   dl_size = 6 * 4 + tc * 0x14;
-    const std::size_t   total = Align16(dl + dl_size);
+    std::vector<Bytes>         entries;
+    std::vector<std::uint32_t> tri_colour;
+    if (attrs != nullptr) {
+        if (attrs->size() != idx.size()) {
+            throw Mismatch(std::format("{} colour entries for {} triangles", attrs->size(), idx.size()));
+        }
+        std::map<Bytes, std::uint32_t> seen;
+        for (const Bytes &e : *attrs) {
+            if (e.size() != 0x10) {
+                throw Mismatch("a colour entry isn't 16 bytes");
+            }
+            auto [it, inserted] = seen.try_emplace(e, static_cast<std::uint32_t>(entries.size()));
+            if (inserted) {
+                entries.push_back(e);
+            }
+            tri_colour.push_back(it->second);
+        }
+    }
+    const std::size_t vc = verts.size(), tc = idx.size(), pos = 0x40;
+    const std::size_t dl = Align16(pos + vc * 16);
+    std::size_t       body_end = dl + 6 * 4 + tc * 0x14, colour_off = 0;
+    if (attrs != nullptr) {
+        colour_off = Align16(body_end);
+        body_end = colour_off + 0x10 * entries.size();
+    }
+    const std::size_t   total = Align16(body_end);
     Bytes               mdt(total, 0);
     const std::uint32_t header[16] = {0x0054444d, 0x40, static_cast<std::uint32_t>(total), static_cast<std::uint32_t>(vc),
                                       static_cast<std::uint32_t>(pos), static_cast<std::uint32_t>(2 * tc), 0, 0, 0, 0,
-                                      static_cast<std::uint32_t>(dl), 0, 0, 1, 0, 0};
+                                      static_cast<std::uint32_t>(dl), 0, 0, 1, static_cast<std::uint32_t>(colour_off), 0};
     for (int i = 0; i < 16; i++) {
         PutU32(mdt, static_cast<std::size_t>(i) * 4, header[i]);
     }
@@ -380,19 +420,24 @@ Bytes BuildCollisionMdt(const std::vector<Tri> &tris, double y_shift = 0.0) {
         PutU32(mdt, o, w);
         o += 4;
     }
-    for (const auto &tri : idx) {
-        for (std::uint32_t v : tri) {
+    for (std::size_t t = 0; t < tc; t++) {
+        for (std::uint32_t v : idx[t]) {
             PutU32(mdt, o, v);
             o += 4;
         }
-        o += 8; // colour index 0, pad
+        PutU32(mdt, o, attrs != nullptr ? tri_colour[t] : 0u);
+        o += 8; // colour index, pad
+    }
+    for (std::size_t e = 0; e < entries.size(); e++) {
+        std::memcpy(mdt.data() + colour_off + e * 0x10, entries[e].data(), 0x10);
     }
     return mdt;
 }
 
 struct Named {
-    std::string      name;
-    std::vector<Tri> tris;
+    std::string        name;
+    std::vector<Tri>   tris;
+    std::vector<Bytes> attrs = {}; // per-triangle 16-byte colour entries (event-trigger tags), or none
 };
 
 // CollisionMdsWriter.BuildFlatMds: node 0 the root, the rest its children, identity frames.
@@ -413,7 +458,7 @@ Bytes BuildFlatMds(const std::vector<Named> &named) {
         for (std::size_t c = 0; c < std::min<std::size_t>(15, named[i].name.size()); c++) {
             out[node + 8 + c] = static_cast<std::uint8_t>(named[i].name[c]);
         }
-        Bytes mdt = BuildCollisionMdt(named[i].tris);
+        Bytes mdt = BuildCollisionMdt(named[i].tris, 0.0, named[i].attrs.empty() ? nullptr : &named[i].attrs);
         PutU32(out, node + 0x28, static_cast<std::uint32_t>(cur));
         PutU32(out, node + 0x2c, i == 0 ? 0xffffffffu : 0u);
         static constexpr float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -1203,9 +1248,10 @@ std::vector<MeshTri> MeshTriangles(const MdtMesh &m, bool drop_degenerate_strips
 // ── Placed meshes (SceneScn.PlacedMeshes), from the parsed mapinfo ──────────────────────────────
 
 struct PlacedMesh {
-    std::string      name, sub;
-    int              inst = 0;
-    std::vector<Vec> verts;
+    std::string                     name, sub;
+    int                             inst = 0;
+    std::vector<Vec>                verts;
+    std::vector<std::array<int, 3>> tris; // SceneScn.Flatten: position indices, strips' degenerates kept
 };
 
 std::string BaseName(const char *path) {
@@ -1289,17 +1335,21 @@ std::vector<PlacedMesh> PlacedMeshes(const Bytes &scn, const EDIT_MAP_INFO *info
             if (fo == kNone) {
                 continue;
             }
-            MdtMesh m;
+            MdtMesh                         m;
+            std::vector<std::array<int, 3>> flat;
             try {
                 m = ParseMdt(scn, fo);
-                if (MeshTriangles(m, false).empty()) {
-                    continue;
+                for (const MeshTri &t : MeshTriangles(m, false)) {
+                    flat.push_back({t.recs[0][0], t.recs[1][0], t.recs[2][0]});
                 }
             } catch (const Mismatch &) {
                 continue;
             }
+            if (flat.empty()) {
+                continue;
+            }
             const Mat &mm = wm(wm, i, 0);
-            PlacedMesh pm{names[i], name, inst, {}};
+            PlacedMesh pm{names[i], name, inst, {}, std::move(flat)};
             for (const Vec4 &p : m.pos) {
                 const Vec v = Xform(mm, {p[0], p[1], p[2]});
                 pm.verts.push_back({v[0] * c + v[2] * s + obj.position[0], v[1] + obj.position[1], -v[0] * s + v[2] * c + obj.position[2]});
@@ -2215,6 +2265,1280 @@ Bytes ReplaceSubInPlace(const Bytes &scn, std::string_view name, const Bytes &fr
     return out;
 }
 
+// ── Queens: geometry helpers (CollisionGeom) ───────────────────────────────────────────────────
+
+using Tris = std::vector<Tri>;
+using map_data::Table;
+
+Vec V(double x, double y, double z) {
+    return {x, y, z};
+}
+
+Tri MakeTri(const Vec &a, const Vec &b, const Vec &c) {
+    return {a, b, c};
+}
+
+Tris TrisFromTable(const Table &t) {
+    Tris out;
+    for (std::size_t r = 0; r < t.rows; r++) {
+        out.push_back({V(t.At(r, 0), t.At(r, 1), t.At(r, 2)), V(t.At(r, 3), t.At(r, 4), t.At(r, 5)), V(t.At(r, 6), t.At(r, 7), t.At(r, 8))});
+    }
+    return out;
+}
+
+void Append(Tris &to, const Tris &from) {
+    to.insert(to.end(), from.begin(), from.end());
+}
+
+bool All(const Tri &t, auto &&pred) {
+    return pred(t[0]) && pred(t[1]) && pred(t[2]);
+}
+
+double MinOf(const Tri &t, int a) {
+    return std::min({t[0][a], t[1][a], t[2][a]});
+}
+
+double MaxOf(const Tri &t, int a) {
+    return std::max({t[0][a], t[1][a], t[2][a]});
+}
+
+bool Box(const Tri &t, double x0, double x1, double y0, double y1, double z0, double z1, double e = 0.5) {
+    return All(t, [&](const Vec &p) { return x0 - e <= p[0] && p[0] <= x1 + e && y0 - e <= p[1] && p[1] <= y1 + e && z0 - e <= p[2] && p[2] <= z1 + e; });
+}
+
+bool PlaneX(const Tri &t, double xv, double z0, double z1, double y0, double y1, double e = 0.5) {
+    return All(t, [&](const Vec &p) { return std::abs(p[0] - xv) < e && z0 - e <= p[2] && p[2] <= z1 + e && y0 - e <= p[1] && p[1] <= y1 + e; });
+}
+
+bool PlaneZ(const Tri &t, double zv, double x0, double x1, double y0, double y1, double e = 0.5) {
+    return All(t, [&](const Vec &p) { return std::abs(p[2] - zv) < e && x0 - e <= p[0] && p[0] <= x1 + e && y0 - e <= p[1] && p[1] <= y1 + e; });
+}
+
+Vec Normal(const Tri &t) {
+    const Vec u = {t[1][0] - t[0][0], t[1][1] - t[0][1], t[1][2] - t[0][2]};
+    const Vec v = {t[2][0] - t[0][0], t[2][1] - t[0][1], t[2][2] - t[0][2]};
+    return {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+}
+
+double Dot3(const Vec &a, const Vec &b) {
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+Vec Cross3(const Vec &a, const Vec &b) {
+    return {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+}
+
+Vec Unit3(const Vec &a) {
+    double l = std::sqrt(Dot3(a, a));
+    if (l == 0) {
+        l = 1.0;
+    }
+    return {a[0] / l, a[1] / l, a[2] / l};
+}
+
+bool Horiz(const Tri &t) {
+    const Vec n = Normal(t);
+    double    h = std::sqrt(Dot3(n, n));
+    if (h == 0) {
+        h = 1.0;
+    }
+    return std::abs(n[1]) > 0.7 * h;
+}
+
+using Key3 = std::array<double, 3>;
+using TriKeyD = std::array<Key3, 3>;
+
+Key3 Round3(const Vec &p, int nd) {
+    return {ExactRound(p[0], nd), ExactRound(p[1], nd), ExactRound(p[2], nd)};
+}
+
+// TriKeyRounded(t, 0): the three vertices to whole units, sorted, so winding doesn't count.
+TriKeyD KeyInt(const Tri &t) {
+    TriKeyD k = {Round3(t[0], 0), Round3(t[1], 0), Round3(t[2], 0)};
+    std::ranges::sort(k);
+    return k;
+}
+
+// TriKeyWinding: the smallest cyclic rotation of the rounded vertices, so winding counts.
+TriKeyD KeyWinding(const Tri &t) {
+    const TriKeyD v = {Round3(t[0], 0), Round3(t[1], 0), Round3(t[2], 0)};
+    TriKeyD       best = v;
+    for (int r = 1; r < 3; r++) {
+        const TriKeyD rot = {v[static_cast<std::size_t>(r)], v[static_cast<std::size_t>((r + 1) % 3)], v[static_cast<std::size_t>((r + 2) % 3)]};
+        if (rot < best) {
+            best = rot;
+        }
+    }
+    return best;
+}
+
+std::set<TriKeyD> KeySet(const Table &table, TriKeyD (*key)(const Tri &)) {
+    std::set<TriKeyD> out;
+    for (const Tri &t : TrisFromTable(table)) {
+        out.insert(key(t));
+    }
+    return out;
+}
+
+Tris DirQuad(const Vec &a, const Vec &b, const Vec &c, const Vec &d, const Vec &want) {
+    if (Dot3(Normal(MakeTri(a, b, c)), want) >= 0) {
+        return {MakeTri(a, b, c), MakeTri(a, c, d)};
+    }
+    return {MakeTri(a, c, b), MakeTri(a, d, c)};
+}
+
+Tris Quad(const Vec &a, const Vec &b, const Vec &c, const Vec &d) {
+    return {MakeTri(a, b, c), MakeTri(a, c, d)};
+}
+
+bool PtInTri2(double px, double py, const std::array<std::pair<double, double>, 3> &tt) {
+    const auto [x0, y0] = tt[0];
+    const auto [x1, y1] = tt[1];
+    const auto [x2, y2] = tt[2];
+    const double d1 = (px - x1) * (y0 - y1) - (x0 - x1) * (py - y1);
+    const double d2 = (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2);
+    const double d3 = (px - x0) * (y2 - y0) - (x2 - x0) * (py - y0);
+    return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
+// The true cells of a grid covered with maximal rectangles (right, then down), never across a hole.
+std::vector<std::array<std::size_t, 4>> GreedyRects(const std::vector<std::vector<bool>> &cov) {
+    const std::size_t                       nx = cov.size(), ny = cov[0].size();
+    std::vector<std::vector<bool>>          used(nx, std::vector<bool>(ny, false));
+    std::vector<std::array<std::size_t, 4>> out;
+    for (std::size_t i = 0; i < nx; i++) {
+        for (std::size_t j = 0; j < ny; j++) {
+            if (!cov[i][j] || used[i][j]) {
+                continue;
+            }
+            std::size_t i1 = i;
+            while (i1 + 1 < nx && cov[i1 + 1][j] && !used[i1 + 1][j]) {
+                i1++;
+            }
+            std::size_t j1 = j;
+            while (j1 + 1 < ny) {
+                bool ok = true;
+                for (std::size_t ii = i; ii <= i1; ii++) {
+                    if (!(cov[ii][j1 + 1] && !used[ii][j1 + 1])) {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (!ok) {
+                    break;
+                }
+                j1++;
+            }
+            for (std::size_t ii = i; ii <= i1; ii++) {
+                for (std::size_t jj = j; jj <= j1; jj++) {
+                    used[ii][jj] = true;
+                }
+            }
+            out.push_back({i, j, i1, j1});
+        }
+    }
+    return out;
+}
+
+Tris PlaneQuad(const Vec &u, const Vec &v, const Vec &nn, double d, double a0, double b0, double a1, double b1) {
+    auto P = [&](double a, double b) {
+        return V(a * u[0] + b * v[0] + d * nn[0], a * u[1] + b * v[1] + d * nn[1], a * u[2] + b * v[2] + d * nn[2]);
+    };
+    const Vec qa = P(a0, b0), qb = P(a1, b0), qc = P(a1, b1), qd = P(a0, b1);
+    if (Dot3(Normal(MakeTri(qa, qb, qc)), nn) < 0) {
+        return {MakeTri(qa, qc, qb), MakeTri(qa, qd, qc)};
+    }
+    return {MakeTri(qa, qb, qc), MakeTri(qa, qc, qd)};
+}
+
+// SimplifyCoplanar: coplanar triangles (any orientation) merged into the fewest rectangles, holes
+// kept; 2D coordinates snap to `snap`; vertical faces extended up to the group's top (from each
+// column's lowest wall cell, or with keep_windows its highest), optionally to `top`; the merged
+// plane set `outward` behind the outermost source point.
+Tris SimplifyCoplanar(const Tris &tris, double snap = 5.0, double outward = 0.0, std::optional<double> top = std::nullopt, bool keep_windows = false) {
+    auto sn = [&](double x) { return std::nearbyint(x / snap) * snap; };
+    using GroupKey = std::array<double, 4>;
+    std::vector<GroupKey> keys;
+
+    struct Group {
+        Vec  nn;
+        Tris g;
+    };
+
+    std::map<GroupKey, Group> groups;
+    Tris                      out;
+    for (const Tri &t : tris) {
+        const Vec n = Normal(t);
+        if (std::sqrt(Dot3(n, n)) < 1e-9) {
+            out.push_back(t);
+            continue;
+        }
+        const Vec      nn = Unit3(n);
+        const double   d = Dot3(nn, t[0]);
+        const GroupKey key = {ExactRound(nn[0], 1), ExactRound(nn[1], 1), ExactRound(nn[2], 1), std::nearbyint(d / snap) * snap + 0.0};
+        auto [it, inserted] = groups.try_emplace(key, Group{nn, {}});
+        if (inserted) {
+            keys.push_back(key);
+        }
+        it->second.g.push_back(t);
+    }
+    for (const GroupKey &key : keys) {
+        const Vec   nn = groups[key].nn;
+        const Tris &g = groups[key].g;
+        if (g.size() < 2) {
+            Append(out, g);
+            continue;
+        }
+        double d = std::numeric_limits<double>::infinity();
+        for (const Tri &t : g) {
+            for (const Vec &p : t) {
+                d = std::min(d, Dot3(nn, p));
+            }
+        }
+        d -= outward;
+        const double dup = nn[1];
+        Vec          vp = {-dup * nn[0], -dup * nn[1], -dup * nn[2]};
+        vp[1] += 1.0;
+        Vec u, v;
+        if (Dot3(vp, vp) < 1e-6) {
+            u = Unit3({1.0 - nn[0] * nn[0], -nn[0] * nn[1], -nn[0] * nn[2]});
+            v = Cross3(nn, u);
+        } else {
+            v = Unit3(vp);
+            u = Unit3(Cross3(v, nn));
+        }
+        std::vector<std::array<std::pair<double, double>, 3>> tri2d;
+        std::vector<double>                                   us, vs;
+        for (const Tri &t : g) {
+            std::array<std::pair<double, double>, 3> tt;
+            for (std::size_t k = 0; k < 3; k++) {
+                tt[k] = {sn(Dot3(t[k], u)), sn(Dot3(t[k], v))};
+                us.push_back(tt[k].first);
+                vs.push_back(tt[k].second);
+            }
+            tri2d.push_back(tt);
+        }
+        std::ranges::sort(us);
+        us.erase(std::unique(us.begin(), us.end()), us.end());
+        std::ranges::sort(vs);
+        vs.erase(std::unique(vs.begin(), vs.end()), vs.end());
+        if (us.size() < 2 || vs.size() < 2) {
+            Append(out, g);
+            continue;
+        }
+        std::vector<std::vector<bool>> cov(us.size() - 1, std::vector<bool>(vs.size() - 1, false));
+        for (std::size_t i = 0; i + 1 < us.size(); i++) {
+            for (std::size_t j = 0; j + 1 < vs.size(); j++) {
+                const double cu = (us[i] + us[i + 1]) / 2, cv = (vs[j] + vs[j + 1]) / 2;
+                cov[i][j] = std::ranges::any_of(tri2d, [&](const auto &tt) { return PtInTri2(cu, cv, tt); });
+            }
+        }
+        if (v[1] > 0.9) {
+            for (auto &col : cov) {
+                std::optional<std::size_t> lo, hi;
+                for (std::size_t j = 0; j < col.size(); j++) {
+                    if (col[j]) {
+                        if (!lo) {
+                            lo = j;
+                        }
+                        hi = j;
+                    }
+                }
+                if (!lo) {
+                    continue;
+                }
+                for (std::size_t j = keep_windows ? *hi : *lo; j < col.size(); j++) {
+                    col[j] = true;
+                }
+            }
+        }
+        Tris fresh;
+        for (const auto &[i0, j0, i1, j1] : GreedyRects(cov)) {
+            double b1 = vs[j1 + 1];
+            if (top && v[1] > 0.9 && std::abs(b1 - vs.back()) < 1e-6) {
+                b1 = *top;
+            }
+            Append(fresh, PlaneQuad(u, v, nn, d, us[i0], vs[j0], us[i1 + 1], b1));
+        }
+        Append(out, fresh.size() < g.size() ? fresh : g);
+    }
+    return out;
+}
+
+using TriPred = std::function<bool(const Tri &)>;
+
+// PlaneRegion: triangles on the plane coord[axis] = off (every corner within 2) whose centre lies
+// in the ranges given.
+TriPred PlaneRegion(int axis, double off, std::optional<std::pair<double, double>> x, std::optional<std::pair<double, double>> y,
+                    std::optional<std::pair<double, double>> z = std::nullopt) {
+    return [=](const Tri &t) {
+        if (!All(t, [&](const Vec &p) { return std::abs(p[static_cast<std::size_t>(axis)] - off) < 2; })) {
+            return false;
+        }
+        const Vec                                                     c = Centroid(t);
+        const std::array<std::optional<std::pair<double, double>>, 3> rngs = {x, y, z};
+        for (std::size_t i = 0; i < 3; i++) {
+            if (rngs[i] && !(rngs[i]->first <= c[i] && c[i] <= rngs[i]->second)) {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
+// CollisionMdt.KdSplit, median form: halve along the longest centroid axis until each leaf holds
+// at most `max_tris`.
+void KdSplitMedian(Tris ts, std::size_t max_tris, const std::vector<int> &axes, std::vector<Tris> &out) {
+    if (ts.size() <= max_tris) {
+        out.push_back(std::move(ts));
+        return;
+    }
+    std::vector<Vec> cs;
+    for (const Tri &t : ts) {
+        cs.push_back(Centroid(t));
+    }
+    int    axis = axes[0];
+    double best = -std::numeric_limits<double>::infinity();
+    for (int a : axes) {
+        auto [lo, hi] = std::ranges::minmax(cs, {}, [a](const Vec &c) { return c[static_cast<std::size_t>(a)]; });
+        const double ext = hi[static_cast<std::size_t>(a)] - lo[static_cast<std::size_t>(a)];
+        if (ext > best) {
+            best = ext;
+            axis = a;
+        }
+    }
+    std::vector<std::size_t> order(ts.size());
+    std::iota(order.begin(), order.end(), 0);
+    std::ranges::stable_sort(order, {}, [&](std::size_t i) { return cs[i][static_cast<std::size_t>(axis)]; });
+    const std::size_t mid = ts.size() / 2;
+    Tris              left, right;
+    for (std::size_t i = 0; i < order.size(); i++) {
+        (i < mid ? left : right).push_back(ts[order[i]]);
+    }
+    KdSplitMedian(std::move(left), max_tris, axes, out);
+    KdSplitMedian(std::move(right), max_tris, axes, out);
+}
+
+std::string FitNodeName(const std::string &name, std::set<std::string> &used, std::size_t maxlen = 15) {
+    std::string cand = name.size() > maxlen ? name.substr(0, maxlen) : name;
+    for (int k = 1; used.contains(cand); k++) {
+        const std::string suf = std::format("~{}", k);
+        cand = name.substr(0, std::min(name.size(), maxlen - suf.size())) + suf;
+    }
+    used.insert(cand);
+    return cand;
+}
+
+std::vector<Named> PoolSplit(const Tris &pool, const std::string &prefix, std::set<std::string> &used, std::size_t max_tris = 100) {
+    std::vector<Tris> leaves;
+    KdSplitMedian(pool, max_tris, {0, 1, 2}, leaves);
+    std::vector<Named> out;
+    for (std::size_t i = 0; i < leaves.size(); i++) {
+        out.push_back({FitNodeName(std::format("{}{}", prefix, i), used), std::move(leaves[i])});
+    }
+    return out;
+}
+
+// An MDS block's nodes with their parent-accumulated frames (SceneScn.Accum).
+struct MdsNodes {
+    std::vector<std::string>  names;
+    std::vector<std::int32_t> mesh;
+    std::vector<Mat>          world;
+};
+
+MdsNodes AccumNodes(const Bytes &b, std::size_t mds) {
+    const std::size_t         cnt = U32(b, mds + 8), tbl = U32(b, mds + 12);
+    MdsNodes                  out;
+    std::vector<Mat>          local(cnt);
+    std::vector<std::int32_t> parent(cnt);
+    for (std::size_t i = 0; i < cnt; i++) {
+        const std::size_t n = mds + tbl + i * 0x70;
+        for (std::size_t k = 0; k < 16; k++) {
+            local[i][k] = F32(b, n + 0x30 + k * 4);
+        }
+        out.names.push_back(NameAt(b, n + 8, 16));
+        out.mesh.push_back(I32(b, n + 0x28));
+        parent[i] = I32(b, n + 0x2c);
+    }
+    for (std::size_t i = 0; i < cnt; i++) {
+        Mat m = local[i];
+        int depth = 0;
+        for (std::int32_t p = parent[i]; p >= 0 && static_cast<std::size_t>(p) < cnt; p = parent[static_cast<std::size_t>(p)]) {
+            if (++depth > 64) {
+                throw Mismatch("node parents loop");
+            }
+            m = Compose(local[static_cast<std::size_t>(p)], m);
+        }
+        out.world.push_back(m);
+    }
+    return out;
+}
+
+std::size_t ResolveMdt(const Bytes &b, std::size_t mds, std::int32_t mesh) {
+    for (std::int64_t cand : {static_cast<std::int64_t>(mesh), static_cast<std::int64_t>(mds) + mesh}) {
+        if (cand > 0 && static_cast<std::size_t>(cand) + 3 < b.size() && IsTag(b, static_cast<std::size_t>(cand), 'M', 'D', 'T')) {
+            return static_cast<std::size_t>(cand);
+        }
+    }
+    return kNone;
+}
+
+// ── Queens: the terrain rules (QueensTerrainRules) ─────────────────────────────────────────────
+
+namespace md = map_data;
+
+Tris WallTris(const Table &walls) {
+    Tris out;
+    for (std::size_t i = 0; i < walls.rows; i++) {
+        const Vec    a0 = V(walls.At(i, 0), walls.At(i, 1), walls.At(i, 2)), b0 = V(walls.At(i, 3), walls.At(i, 4), walls.At(i, 5));
+        const double h = walls.At(i, 6);
+        const Vec    a1 = V(a0[0], a0[1] + h, a0[2]), b1 = V(b0[0], b0[1] + h, b0[2]);
+        out.push_back(MakeTri(a0, b0, b1));
+        out.push_back(MakeTri(a0, b1, a1));
+    }
+    return out;
+}
+
+Tris FlatGroundTris() {
+    Tris         out;
+    const Table &f = md::kQueensFlatRegions;
+    for (std::size_t i = 0; i < f.rows; i++) {
+        const double x0 = f.At(i, 0), x1 = f.At(i, 1), z0 = f.At(i, 2), z1 = f.At(i, 3), y = f.At(i, 4);
+        out.push_back(MakeTri(V(x0, y, z0), V(x1, y, z0), V(x1, y, z1)));
+        out.push_back(MakeTri(V(x0, y, z0), V(x1, y, z1), V(x0, y, z1)));
+    }
+    return out;
+}
+
+// Each canal pipe stub as its bounding box: four sides and the free end (the end in the wall open).
+Tris PipeDrumTris() {
+    Tris         out;
+    const Table &p = md::kQueensPipeDrums;
+    for (std::size_t i = 0; i < p.rows; i++) {
+        const double cx = p.At(i, 0), cy = p.At(i, 1), z0 = p.At(i, 2), z1 = p.At(i, 3), r = p.At(i, 4);
+        const double x0 = cx - r, x1 = cx + r, y0 = cy - r, y1 = cy + r;
+        const bool   emb = std::abs(z0) > std::abs(z1);
+        const double zf = emb ? z1 : z0;
+        Append(out, DirQuad(V(x1, y0, z0), V(x1, y1, z0), V(x1, y1, z1), V(x1, y0, z1), V(1, 0, 0)));
+        Append(out, DirQuad(V(x0, y0, z0), V(x0, y1, z0), V(x0, y1, z1), V(x0, y0, z1), V(-1, 0, 0)));
+        Append(out, DirQuad(V(x0, y1, z0), V(x1, y1, z0), V(x1, y1, z1), V(x0, y1, z1), V(0, 1, 0)));
+        Append(out, DirQuad(V(x0, y0, z0), V(x1, y0, z0), V(x1, y0, z1), V(x0, y0, z1), V(0, -1, 0)));
+        Append(out, DirQuad(V(x0, y0, zf), V(x1, y0, zf), V(x1, y1, zf), V(x0, y1, zf), V(0, 0, emb ? 1 : -1)));
+    }
+    return out;
+}
+
+Tris BothWallTris() {
+    Tris out = WallTris(md::kQueensBothWalls);
+    Append(out, TrisFromTable(md::kQueensManualTris));
+    Append(out, FlatGroundTris());
+    Append(out, PipeDrumTris());
+    return out;
+}
+
+// The canal containment, every wall's top pulled down to its ground there plus 5: the feet-level
+// check still hits it, the higher camera clears it.
+Tris InvisibleTris(double max_height = 5.0) {
+    Tris                                        tris = TrisFromTable(md::kQueensCanalContainmentTris);
+    auto                                        key = [](const Vec &p) { return std::pair{ExactRound(p[0], 1), ExactRound(p[2], 1)}; };
+    std::map<std::pair<double, double>, double> ground;
+    for (const Tri &t : tris) {
+        for (const Vec &p : t) {
+            auto [it, inserted] = ground.try_emplace(key(p), p[1]);
+            if (!inserted) {
+                it->second = std::min(it->second, p[1]);
+            }
+        }
+    }
+    for (Tri &t : tris) {
+        for (Vec &p : t) {
+            p[1] = std::min(p[1], ground[key(p)] + max_height);
+        }
+    }
+    return tris;
+}
+
+Tris PerimeterWallTris(double y_bottom = 170.0, double y_top = 500.0) {
+    const Table      &c = md::kQueensPerimeterCorners;
+    const std::size_t n = c.rows;
+    Tris              walls;
+    for (std::size_t i = 0; i < n; i++) {
+        const double ax = c.At(i, 0), az = c.At(i, 1), bx = c.At((i + 1) % n, 0), bz = c.At((i + 1) % n, 1);
+        walls.push_back(MakeTri(V(ax, y_top, az), V(bx, y_top, bz), V(bx, y_bottom, bz)));
+        walls.push_back(MakeTri(V(ax, y_top, az), V(bx, y_bottom, bz), V(ax, y_bottom, az)));
+    }
+    const std::set<TriKeyD> rem = KeySet(md::kQueensPerimeterPreRemoveTris, KeyInt);
+    Tris                    out;
+    for (const Tri &w : walls) {
+        if (!rem.contains(KeyInt(w))) {
+            out.push_back(w);
+        }
+    }
+    Append(out, WallTris(md::kQueensPerimeterExtraWalls));
+    return out;
+}
+
+bool InRemoveRegion(const Tri &t) {
+    return PlaneZ(t, 1300, -400, 600, 0, 270) || PlaneX(t, 600, 200, 1300, 0, 272) || PlaneX(t, 600, 200, 1250, 262, 376) ||
+           Box(t, -500, -400, 70, 170, -900, -200) || PlaneX(t, -400, -1000, -150, 70, 276) || PlaneX(t, 900, -1000, -150, 70, 276) ||
+           PlaneZ(t, -1000, -400, 900, 70, 276) || (Box(t, -500, 1000, 260, 278, -1100, -1000) && Horiz(t)) ||
+           (Box(t, -500, -350, 260, 278, -1000, -150) && Horiz(t)) || (Box(t, 850, 1000, 260, 278, -1000, -150) && Horiz(t)) ||
+           PlaneX(t, 1500, 250, 1300, 170, 370) || PlaneZ(t, 1300, 650, 1500, 170, 370) || Box(t, 650, 1600, 370, 370, 100, 1400) ||
+           Box(t, 1400, 1600, 64, 89, -50, 50) || PlaneX(t, 1400, -50, 50, 89, 170);
+}
+
+const std::set<TriKeyD> &ResidueKeys() {
+    static const std::set<TriKeyD> keys = KeySet(md::kQueensRemoveResidueTris, KeyInt);
+    return keys;
+}
+
+// The camera walls known to be wound backwards are turned round.
+Tris FixCameraWinding(const Tris &tris) {
+    static const std::set<TriKeyD> backface = KeySet(md::kQueensBackfaceTris, KeyWinding);
+    Tris                           out;
+    for (const Tri &t : tris) {
+        out.push_back(backface.contains(KeyWinding(t)) ? MakeTri(t[0], t[2], t[1]) : t);
+    }
+    return out;
+}
+
+bool InFlatRegion(const Tri &t) {
+    const Table &f = md::kQueensFlatRegions;
+    for (std::size_t i = 0; i < f.rows; i++) {
+        const double x0 = f.At(i, 0), x1 = f.At(i, 1), z0 = f.At(i, 2), z1 = f.At(i, 3), y = f.At(i, 4);
+        if (All(t, [&](const Vec &p) { return x0 - 1 <= p[0] && p[0] <= x1 + 1 && z0 - 1 <= p[2] && p[2] <= z1 + 1 && std::abs(p[1] - y) <= 2; })) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool CanalWall(const Tri &t) {
+    return (All(t, [](const Vec &p) { return std::abs(p[2] + 50) < 1; }) || All(t, [](const Vec &p) { return std::abs(p[2] - 50) < 1; })) &&
+           All(t, [](const Vec &p) { return -1 <= p[1] && p[1] <= 71 && -201 <= p[0] && p[0] <= 901; });
+}
+
+// The shared terrain simplification: everything at or west of x -500 and wholly east of x 1600
+// dropped, the removal regions and residue, the flat ground (replaced by quads) and the canal side
+// walls between x -200 and 900.
+Tris SimplifyTerrain(const Tris &tris) {
+    Tris out;
+    for (const Tri &t : tris) {
+        if (MaxOf(t, 0) > -499.0 && MinOf(t, 0) < 1600.0 && !InRemoveRegion(t) && !ResidueKeys().contains(KeyInt(t)) && !InFlatRegion(t) &&
+            !CanalWall(t)) {
+            out.push_back(t);
+        }
+    }
+    return out;
+}
+
+constexpr double kCanalWallTopY = 280.0;
+
+// The major town walls: the vertical faces merged (holes kept, the ramparts forced to one height),
+// the x -400 arcade's non-walkable parts filled solid, the three walkway tops, the z 200 staircase
+// walls flattened, the x 1400 to 1500 sections capped at the obj33 ledge, the x 695 return moved
+// flush to x 700, the west corner closed.
+Tris TownWallTris() {
+    const Tris all = TrisFromTable(md::kQueensTownWallTris);
+    Tris       vert;
+    for (const Tri &t : all) {
+        const Vec n = Normal(t);
+        double    l = std::sqrt(Dot3(n, n));
+        if (l == 0) {
+            l = 1.0;
+        }
+        if (std::abs(n[1]) / l < 0.5) {
+            vert.push_back(t);
+        }
+    }
+    constexpr std::array<std::array<double, 3>, 2> kX400Solid = {
+        {{200.0, 500.0, 280.0}, {600.0, 1300.0, 270.0}}
+    };
+    auto in_solid = [&](const Tri &t) {
+        if (!All(t, [](const Vec &p) { return std::abs(p[0] + 400) < 1; })) {
+            return false;
+        }
+        const double cz = (t[0][2] + t[1][2] + t[2][2]) / 3;
+        return std::ranges::any_of(kX400Solid, [&](const auto &s) { return s[0] - 5 <= cz && cz <= s[1] + 5; });
+    };
+    const std::array<std::pair<double, TriPred>, 2> forced = {
+        {
+         {280.0, [](const Tri &t) { return All(t, [](const Vec &p) { return std::abs(p[2] - 150) < 1; }) || All(t, [](const Vec &p) { return std::abs(p[0] - 695) < 1; }); }},
+         {380.0, [](const Tri &t) { return All(t, [](const Vec &p) { return std::abs(p[2] - 250) < 1; }); }},
+         }
+    };
+    Tris              out;
+    std::vector<bool> done(vert.size(), false);
+    for (const auto &[h, pred] : forced) {
+        Tris grp;
+        for (std::size_t i = 0; i < vert.size(); i++) {
+            if (pred(vert[i]) && !in_solid(vert[i])) {
+                grp.push_back(vert[i]);
+                done[i] = true;
+            }
+        }
+        Append(out, SimplifyCoplanar(grp, 10.0, 0.0, h, true));
+    }
+    Tris rest;
+    for (std::size_t i = 0; i < vert.size(); i++) {
+        if (!done[i] && !in_solid(vert[i])) {
+            rest.push_back(vert[i]);
+        }
+    }
+    Append(out, SimplifyCoplanar(rest, 10.0, 0.0, std::nullopt, true));
+    for (const auto &[z0, z1, ty] : kX400Solid) {
+        Append(out, DirQuad(V(-400, 0, z0), V(-400, 0, z1), V(-400, ty, z1), V(-400, ty, z0), V(1, 0, 0)));
+    }
+    Append(out, DirQuad(V(-400, 280, 150), V(700, 280, 150), V(700, 280, 200), V(-400, 280, 200), V(0, 1, 0)));
+    Append(out, DirQuad(V(600, 380, 200), V(1350, 380, 200), V(1350, 380, 250), V(600, 380, 250), V(0, 1, 0)));
+    Append(out, DirQuad(V(600, 380, 200), V(650, 380, 200), V(650, 380, 1300), V(600, 380, 1300), V(0, 1, 0)));
+    auto drop = [&](auto &&pred) { std::erase_if(out, pred); };
+    drop([](const Tri &t) {
+        return All(t, [](const Vec &p) { return std::abs(p[2] - 200) < 1 && -1 <= p[0] && p[0] <= 601 && -1 <= p[1] && p[1] <= 281; }) && Normal(t)[2] > 0;
+    });
+    Append(out, DirQuad(V(0, 0, 200), V(600, 0, 200), V(600, 280, 200), V(0, 280, 200), V(0, 0, 1)));
+    drop([](const Tri &t) {
+        return All(t, [](const Vec &p) { return std::abs(p[2] - 200) < 1 && 599 <= p[0] && p[0] <= 1301 && 69 <= p[1] && p[1] <= 381; }) && Normal(t)[2] < 0;
+    });
+    Append(out, DirQuad(V(600, 70, 200), V(1300, 70, 200), V(1300, 380, 200), V(600, 380, 200), V(0, 0, -1)));
+    auto x1400 = [](const Tri &t, double zplane, int nsign) {
+        return All(t, [&](const Vec &p) { return 1399 <= p[0] && p[0] <= 1501 && 169 <= p[1] && p[1] <= 381 && std::abs(p[2] - zplane) < 1; }) &&
+               Normal(t)[2] * nsign > 0;
+    };
+    drop([&](const Tri &t) { return x1400(t, 250, +1) || x1400(t, 200, -1); });
+    Append(out, DirQuad(V(1400, 170, 250), V(1500, 170, 250), V(1500, 370, 250), V(1400, 370, 250), V(0, 0, 1)));
+    Append(out, DirQuad(V(1400, 170, 200), V(1500, 170, 200), V(1500, 370, 200), V(1400, 370, 200), V(0, 0, -1)));
+    Append(out, DirQuad(V(1400, 370, 200), V(1500, 370, 200), V(1500, 370, 250), V(1400, 370, 250), V(0, 1, 0)));
+    drop([](const Tri &t) {
+        return All(t, [](const Vec &p) { return std::abs(p[0] - 695) < 1 && 149 <= p[2] && p[2] <= 201 && 69 <= p[1] && p[1] <= 281; });
+    });
+    Append(out, DirQuad(V(700, 70, 150), V(700, 70, 200), V(700, 280, 200), V(700, 280, 150), V(1, 0, 0)));
+    Append(out, DirQuad(V(-400, 70, 50), V(-400, 70, 150), V(-400, 270, 150), V(-400, 270, 50), V(1, 0, 0)));
+    return out;
+}
+
+bool NorthFace(const Tri &t) {
+    const double cx = (t[0][0] + t[1][0] + t[2][0]) / 3.0;
+    return All(t, [](const Vec &p) { return std::abs(p[2] + 100) < 2; }) && MinOf(t, 1) >= 55 && MaxOf(t, 1) <= 290 && -450 <= cx && cx <= 1550;
+}
+
+bool WallCap(const Tri &t) {
+    return MaxOf(t, 2) - MinOf(t, 2) > 40 && All(t, [](const Vec &p) { return -152 <= p[2] && p[2] <= -98; }) &&
+           All(t, [](const Vec &p) { return -401 <= p[0] && p[0] <= 1501; }) && MinOf(t, 1) >= 258 && Normal(t)[1] > 0;
+}
+
+// CamMergeSelected: each directed job takes its triangles (a merge job merges them, a replace job
+// swaps in authored quads); everything else goes through at full detail.
+Tris CamMergeSelected(const Tris &tris) {
+    static const std::set<TriKeyD> town = KeySet(md::kQueensTownWallTris, KeyInt);
+    static const std::set<TriKeyD> arcade = KeySet(md::kQueensArcadeBackTris, KeyInt);
+    static const std::set<TriKeyD> notch = KeySet(md::kQueensZ200NotchTris, KeyInt);
+
+    struct Job {
+        bool                  merge;
+        TriPred               sel;
+        std::function<Tris()> make;
+    };
+
+    const std::vector<Job> jobs = {
+        {true, PlaneRegion(2, -150, std::pair{-400.0, 900.0}, std::pair{55.0, 290.0}), {}},
+        {false, NorthFace,
+         [] {
+             Tris q = Quad(V(-400, 70, -100), V(200, 70, -100), V(200, kCanalWallTopY, -100), V(-400, kCanalWallTopY, -100));
+             Append(q, Quad(V(300, 70, -100), V(1500, 70, -100), V(1500, kCanalWallTopY, -100), V(300, kCanalWallTopY, -100)));
+             return q;
+         }},
+        {false, WallCap, [] { return Quad(V(-400, kCanalWallTopY, -100), V(1500, kCanalWallTopY, -100), V(1500, kCanalWallTopY, -150), V(-400, kCanalWallTopY, -150)); }},
+        {false, [](const Tri &t) { return town.contains(KeyInt(t)); }, TownWallTris},
+        {false, [](const Tri &t) { return arcade.contains(KeyInt(t)); }, [] { return Tris{}; }},
+        {false, [](const Tri &t) { return notch.contains(KeyInt(t)); }, [] { return Tris{}; }},
+    };
+    Tris remaining = tris, out;
+    for (const Job &job : jobs) {
+        Tris picked, left;
+        for (const Tri &t : remaining) {
+            (job.sel(t) ? picked : left).push_back(t);
+        }
+        remaining = std::move(left);
+        if (picked.empty()) {
+            continue;
+        }
+        Append(out, job.merge ? SimplifyCoplanar(picked, 5.0, 0.0, kCanalWallTopY) : job.make());
+    }
+    Append(out, remaining);
+    return out;
+}
+
+// GateKey: the corners, shifted by dx, to a tenth, sorted.
+TriKeyD GateKey(const Tri &t, double dx = 0.0) {
+    TriKeyD k;
+    for (std::size_t i = 0; i < 3; i++) {
+        k[i] = {ExactRound(t[i][0] + dx, 1), ExactRound(t[i][1], 1), ExactRound(t[i][2], 1)};
+    }
+    std::ranges::sort(k);
+    return k;
+}
+
+// obj40 and obj44 (the same bridge-gate mesh): each corner torch post (y 77 and up) becomes a
+// full-height corner column, the inner railings and old filler walls go, the walkway top and the
+// outer face's top edge go up 8, the vaulted roof becomes 4 quads, and the z-end gaps close.
+Tris GateTorchSimplify(const Tris &tris) {
+    double xmin = std::numeric_limits<double>::infinity(), xmax = -xmin, zmin = xmin, zmax = -xmin;
+    for (const Tri &t : tris) {
+        for (const Vec &p : t) {
+            xmin = std::min(xmin, p[0]);
+            xmax = std::max(xmax, p[0]);
+            zmin = std::min(zmin, p[2]);
+            zmax = std::max(zmax, p[2]);
+        }
+    }
+    const double      dx = ExactRound(xmin - md::kGateXMinRef, 0);
+    std::set<TriKeyD> drop_keys, raise_keys, extend_keys, roof_keys;
+    for (const Table *table : {&md::kGateRailingTris, &md::kGateOuterFillerTris}) {
+        for (const Tri &t : TrisFromTable(*table)) {
+            drop_keys.insert(GateKey(t, dx));
+        }
+    }
+    for (const Tri &t : TrisFromTable(md::kGateWalkwayRaiseTris)) {
+        raise_keys.insert(GateKey(t, dx));
+    }
+    for (const Tri &t : TrisFromTable(md::kGateOuterFaceExtendTris)) {
+        extend_keys.insert(GateKey(t, dx));
+    }
+    constexpr double                   kY0 = 77.25, kXW = 7.0, kZW = 8.0, kDy = 8.0;
+    std::vector<std::array<double, 4>> regions;
+    for (int sx : {0, 1}) {
+        for (int sz : {0, 1}) {
+            const auto rx = sx == 0 ? std::pair{xmin - 0.5, xmin + kXW} : std::pair{xmax - kXW, xmax + 0.5};
+            const auto rz = sz == 0 ? std::pair{zmin - 0.5, zmin + kZW} : std::pair{zmax - kZW, zmax + 0.5};
+            regions.push_back({rx.first, rx.second, rz.first, rz.second});
+        }
+    }
+    Tris              keep;
+    std::vector<Tris> cap(regions.size());
+    for (const Tri &t : tris) {
+        const TriKeyD k = GateKey(t);
+        if (drop_keys.contains(k)) {
+            continue;
+        }
+        if (raise_keys.contains(k)) {
+            Tri r = t;
+            for (Vec &p : r) {
+                p[1] += kDy;
+            }
+            keep.push_back(r);
+            continue;
+        }
+        if (extend_keys.contains(k)) {
+            Tri r = t;
+            for (Vec &p : r) {
+                p[1] += p[1] >= 65 ? kDy : 0.0;
+            }
+            keep.push_back(r);
+            continue;
+        }
+        const Vec c = Centroid(t);
+        int       r = -1;
+        if (c[1] >= kY0) {
+            for (std::size_t ri = 0; ri < regions.size(); ri++) {
+                const auto &[x0, x1, z0, z1] = regions[ri];
+                if (x0 <= c[0] && c[0] <= x1 && z0 <= c[2] && c[2] <= z1) {
+                    r = static_cast<int>(ri);
+                    break;
+                }
+            }
+        }
+        (r < 0 ? keep : cap[static_cast<std::size_t>(r)]).push_back(t);
+    }
+    Tris out = keep;
+    for (const Tris &g : cap) {
+        if (g.empty()) {
+            continue;
+        }
+        double X0 = std::numeric_limits<double>::infinity(), X1 = -X0, YT = -X0, Z0 = X0, Z1 = -X0;
+        for (const Tri &t : g) {
+            for (const Vec &p : t) {
+                X0 = std::min(X0, p[0]);
+                X1 = std::max(X1, p[0]);
+                YT = std::max(YT, p[1]);
+                Z0 = std::min(Z0, p[2]);
+                Z1 = std::max(Z1, p[2]);
+            }
+        }
+        const double YB = 0.0;
+        Append(out, DirQuad(V(X0, YT, Z0), V(X1, YT, Z0), V(X1, YT, Z1), V(X0, YT, Z1), V(0, 1, 0)));
+        Append(out, DirQuad(V(X0, YB, Z0), V(X0, YB, Z1), V(X0, YT, Z1), V(X0, YT, Z0), V(-1, 0, 0)));
+        Append(out, DirQuad(V(X1, YB, Z0), V(X1, YB, Z1), V(X1, YT, Z1), V(X1, YT, Z0), V(1, 0, 0)));
+        Append(out, DirQuad(V(X0, YB, Z0), V(X1, YB, Z0), V(X1, YT, Z0), V(X0, YT, Z0), V(0, 0, -1)));
+        Append(out, DirQuad(V(X0, YB, Z1), V(X1, YB, Z1), V(X1, YT, Z1), V(X0, YT, Z1), V(0, 0, 1)));
+    }
+    for (const Tri &t : TrisFromTable(md::kGateRoof24Tris)) {
+        roof_keys.insert(GateKey(t, dx));
+    }
+    std::erase_if(out, [&](const Tri &t) { return roof_keys.contains(GateKey(t)); });
+    const Table &q8 = md::kGateRoof8Quads;
+    for (std::size_t q = 0; q < q8.rows; q++) {
+        auto P = [&](std::size_t k) { return V(q8.At(q, k * 3) + dx, q8.At(q, k * 3 + 1), q8.At(q, k * 3 + 2)); };
+        Append(out, DirQuad(P(0), P(1), P(2), P(3), V(0, 1, 0)));
+    }
+    for (const auto &[zc, wn] : {
+             std::pair{-50.0, V(0, 0, -1)},
+             std::pair{50.0,  V(0, 0, 1) }
+    }) {
+        Append(out, DirQuad(V(-68.0 + dx, 70.0, zc), V(-28.0 + dx, 70.0, zc), V(-28.0 + dx, 78.0, zc), V(-68.0 + dx, 78.0, zc), wn));
+    }
+    return out;
+}
+
+// ── Queens: the ground and camera collision (QueensCollision) ──────────────────────────────────
+
+bool IsGroundSub(std::string_view n) {
+    return n.size() == 6 && n.starts_with("e03g") && std::isdigit(static_cast<unsigned char>(n[4])) && std::isdigit(static_cast<unsigned char>(n[5]));
+}
+
+std::optional<int> ObjIndex(std::string_view n) {
+    if (!n.starts_with("obj") || n.size() < 4 || !std::isdigit(static_cast<unsigned char>(n[3]))) {
+        return std::nullopt;
+    }
+    int v = 0;
+    for (std::size_t i = 3; i < n.size() && std::isdigit(static_cast<unsigned char>(n[i])); i++) {
+        v = v * 10 + (n[i] - '0');
+    }
+    return v;
+}
+
+// grid3* and the obj40, 44, 6, 33, 34, 43, 45 and 42 structures (the obj1 and obj9 pipes are left
+// out: solid drums replace them).
+bool IsCameraStructureNode(std::string_view n) {
+    if (n.starts_with("grid3")) {
+        return true;
+    }
+    const auto i = ObjIndex(n);
+    return i && (*i == 40 || *i == 44 || *i == 6 || *i == 33 || *i == 34 || *i == 43 || *i == 45 || *i == 42);
+}
+
+// The loading-zone trigger triangles in each ground _a: the ones whose colour entry carries a
+// destination tag. They must survive into the rebuilt _a or the town exits stop working.
+std::map<std::string, std::vector<Named>> TriggerNodes(const Bytes &scn) {
+    std::map<std::string, std::vector<Named>> out;
+    for (const DirEntry &e : Directory(scn)) {
+        if (!IsGroundSub(e.name)) {
+            continue;
+        }
+        const std::size_t vo = VariantOff(scn, e, e.name, "_a");
+        if (vo == kNone) {
+            continue;
+        }
+        const std::size_t  mds = e.off + vo;
+        const MdsNodes     nodes = AccumNodes(scn, mds);
+        std::vector<Named> found;
+        for (std::size_t ni = 0; ni < nodes.names.size(); ni++) {
+            if (nodes.mesh[ni] == 0) {
+                continue;
+            }
+            const std::size_t fo = ResolveMdt(scn, mds, nodes.mesh[ni]);
+            if (fo == kNone) {
+                continue;
+            }
+            const std::size_t pos = U32(scn, fo + 0x10), dl = U32(scn, fo + 0x28), col = U32(scn, fo + 0x38);
+            const std::size_t tc = U32(scn, fo + dl + 0x14), rb = fo + dl + 0x18;
+            const Mat        &M = nodes.world[ni];
+            Named             n{nodes.names[ni], {}, {}};
+            for (std::size_t t = 0; t < tc; t++) {
+                const std::int32_t i0 = I32(scn, rb + t * 0x14), i1 = I32(scn, rb + t * 0x14 + 4), i2 = I32(scn, rb + t * 0x14 + 8);
+                const std::int32_t ci = I32(scn, rb + t * 0x14 + 12);
+                if (!(col != 0 && ci >= 0)) {
+                    continue;
+                }
+                const std::size_t eo = fo + col + static_cast<std::size_t>(ci) * 0x10;
+                if (eo + 0x10 > scn.size() || (scn[eo] | (scn[eo + 1] << 8)) == 0) {
+                    continue;
+                }
+                auto vv = [&](std::int32_t i) {
+                    const std::size_t at = fo + pos + static_cast<std::size_t>(i) * 0x10;
+                    return Xform(M, {F32(scn, at), F32(scn, at + 4), F32(scn, at + 8)});
+                };
+                n.tris.push_back({vv(i0), vv(i1), vv(i2)});
+                n.attrs.emplace_back(scn.begin() + static_cast<std::ptrdiff_t>(eo), scn.begin() + static_cast<std::ptrdiff_t>(eo + 0x10));
+            }
+            if (!n.tris.empty()) {
+                found.push_back(std::move(n));
+            }
+        }
+        if (!found.empty()) {
+            out[e.name] = std::move(found);
+        }
+    }
+    return out;
+}
+
+struct QueensGrouped {
+    std::vector<std::string>                  subs;
+    std::map<std::string, std::vector<Named>> player;
+    std::vector<Named>                        camera;
+};
+
+QueensGrouped GroupedCollision(const std::vector<PlacedMesh> &placed, const Bytes &scn, std::size_t max_tris = 100) {
+    std::map<std::string, Tris> by_sub, cam_by_sub, cam_own;
+    for (const PlacedMesh &pm : placed) {
+        if (!IsCameraStructureNode(pm.name)) {
+            continue;
+        }
+        Tris src;
+        for (const auto &tr : pm.tris) {
+            src.push_back({pm.verts.at(static_cast<std::size_t>(tr[0])), pm.verts.at(static_cast<std::size_t>(tr[1])), pm.verts.at(static_cast<std::size_t>(tr[2]))});
+        }
+        const Tris t = SimplifyTerrain(src);
+        if (t.empty()) {
+            continue;
+        }
+        Append(by_sub[pm.sub], t);
+        if (pm.name == "obj40" || pm.name == "obj44") {
+            Append(cam_own[pm.name], t);
+        } else {
+            Append(cam_by_sub[pm.sub], t);
+        }
+    }
+    QueensGrouped g;
+    for (const auto &[sub, _] : by_sub) {
+        g.subs.push_back(sub); // std::map keeps them in ordinal order
+    }
+    const Tris perim = PerimeterWallTris(), bw = BothWallTris(), inv = InvisibleTris(), pw = WallTris(md::kQueensPlayerWalls);
+    const auto triggers = TriggerNodes(scn);
+    for (std::size_t i = 0; i < g.subs.size(); i++) {
+        const std::string    &sub = g.subs[i];
+        std::set<std::string> used;
+        Tris                  pool = by_sub[sub];
+        if (i == 0) {
+            Append(pool, perim);
+            Append(pool, bw);
+            Append(pool, inv);
+            Append(pool, pw);
+        }
+        std::vector<Named> named = PoolSplit(pool, "pcol", used, max_tris);
+        if (auto it = triggers.find(sub); it != triggers.end()) {
+            for (const Named &trig : it->second) {
+                named.push_back({FitNodeName(trig.name, used), trig.tris, trig.attrs});
+            }
+        }
+        g.player[sub] = std::move(named);
+    }
+    Tris structs;
+    for (const std::string &sub : g.subs) {
+        if (auto it = cam_by_sub.find(sub); it != cam_by_sub.end()) {
+            Append(structs, it->second);
+        }
+    }
+    Tris cam = FixCameraWinding(structs);
+    Append(cam, FixCameraWinding(perim));
+    Append(cam, FixCameraWinding(bw));
+    Append(cam, TrisFromTable(md::kQueensCameraTris));
+    std::set<std::string> cused;
+    g.camera = PoolSplit(CamMergeSelected(cam), "ccol", cused, max_tris);
+    for (const auto &[name, tris] : cam_own) {
+        g.camera.push_back({FitNodeName("c" + name, cused), FixCameraWinding(GateTorchSimplify(tris))});
+    }
+    return g;
+}
+
+// The waterfall frames' Z-write back on (their "z" name flag becomes "x", which means nothing), so
+// the player's body hides behind them.
+int EnableWaterfallZwrite(Bytes &scn) {
+    int n = 0;
+    for (std::string_view pat : {"obj48__a01z", "taki2__a01z"}) {
+        for (std::size_t j = Find(scn, pat); j != kNone; j = FindFrom(scn, pat, j + 1)) {
+            if (scn[j + pat.size() - 1] == 'z') {
+                scn[j + pat.size() - 1] = 'x';
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+// BakeStructures: every ground sub's _a rebuilt, the camera _c gathered on the first ground that
+// has one, and the waterfalls' Z-write on.
+Bytes QueensBakeStructures(const Bytes &scene, const EDIT_MAP_INFO *info) {
+    const std::vector<PlacedMesh> placed = PlacedMeshes(scene, info);
+    if (placed.empty()) {
+        throw Mismatch("no placed meshes (the mapinfo's GROUND entries)");
+    }
+    const QueensGrouped g = GroupedCollision(placed, scene);
+    if (g.subs.empty()) {
+        throw Mismatch("none of the structure meshes (grid3*, obj40 and so on) found");
+    }
+    Bytes       scn = scene;
+    std::size_t player_nodes = 0, player_tris = 0, cam_tris = 0;
+    for (const std::string &sub : g.subs) {
+        const auto &named = g.player.at(sub);
+        scn = ReplaceBlock(scn, sub, BuildFlatMds(named), "_a");
+        player_nodes += named.size();
+        for (const Named &n : named) {
+            player_tris += n.tris.size();
+        }
+    }
+    std::string host;
+    for (const std::string &sub : g.subs) {
+        const auto dir = Directory(scn);
+        if (VariantOff(scn, Sub(dir, sub), sub, "_c") != kNone) {
+            host = sub;
+            break;
+        }
+    }
+    if (!host.empty() && !g.camera.empty()) {
+        scn = ReplaceBlock(scn, host, BuildFlatMds(g.camera), "_c");
+        for (const Named &n : g.camera) {
+            cam_tris += n.tris.size();
+        }
+    }
+    const int falls = EnableWaterfallZwrite(scn);
+    Note(std::format("e03: {} camera nodes ({} tris) on {}, {} player nodes ({} tris) on {} grounds, {} waterfall frames with Z-write, scene {} -> {} bytes",
+                     host.empty() ? 0 : g.camera.size(), cam_tris, host.empty() ? "none" : host, player_nodes, player_tris, g.subs.size(), falls,
+                     scene.size(), scn.size()));
+    return scn;
+}
+
+// ── Queens: the snake statue (SnakeStatueCollision) ────────────────────────────────────────────
+
+constexpr std::size_t kSnakeMaxPlayerTris = 1000; // one node for the whole model: fewer, larger nodes snag less
+constexpr int         kSnakeHullSegments = 16;
+constexpr double      kSnakeHullAxis[2] = {-13.80, 49.65}; // the centre of the two snake-head summit triangles
+
+bool TriMatches(const Tri &t, const Tri &r, double tol = 0.05) {
+    for (int rot = 0; rot < 3; rot++) {
+        bool ok = true;
+        for (int i = 0; i < 3 && ok; i++) {
+            for (int j = 0; j < 3; j++) {
+                if (std::abs(t[static_cast<std::size_t>(i)][static_cast<std::size_t>(j)] - r[static_cast<std::size_t>((i + rot) % 3)][static_cast<std::size_t>(j)]) > tol) {
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if (ok) {
+            return true;
+        }
+    }
+    return false;
+}
+
+Tris SnakeSurgery(const Tris &tris) {
+    const Tris remove = TrisFromTable(md::kSnakeStatueRemoveTris);
+    Tris       kept;
+    int        removed = 0;
+    for (const Tri &t : tris) {
+        if (std::ranges::any_of(remove, [&](const Tri &r) { return TriMatches(t, r); })) {
+            removed++;
+            continue;
+        }
+        kept.push_back(t);
+    }
+    if (removed != static_cast<int>(remove.size())) {
+        Note(std::format("e03h06: {} triangles removed but {} listed", removed, remove.size()));
+    }
+    Append(kept, TrisFromTable(md::kSnakeStatueAddTris));
+    return kept;
+}
+
+// Every triangle of the part's visual mesh, all mesh nodes, in part space.
+Tris FullVisualTris(const Bytes &sub) {
+    const std::size_t mds0 = U32(sub, 0x48);
+    const MdsNodes    nodes = AccumNodes(sub, mds0);
+    Tris              out;
+    for (std::size_t i = 0; i < nodes.names.size(); i++) {
+        if (nodes.mesh[i] == 0) {
+            continue;
+        }
+        const std::size_t fo = ResolveMdt(sub, mds0, nodes.mesh[i]);
+        if (fo == kNone) {
+            continue;
+        }
+        MdtMesh m;
+        try {
+            m = ParseMdt(sub, fo);
+        } catch (const Mismatch &) {
+            continue;
+        }
+        std::vector<Vec> wv;
+        for (const Vec4 &p : m.pos) {
+            wv.push_back(Xform(nodes.world[i], {p[0], p[1], p[2]}));
+        }
+        for (const MeshTri &t : MeshTriangles(m, false)) {
+            out.push_back({wv.at(static_cast<std::size_t>(t.recs[0][0])), wv.at(static_cast<std::size_t>(t.recs[1][0])), wv.at(static_cast<std::size_t>(t.recs[2][0]))});
+        }
+    }
+    return out;
+}
+
+// The camera hull as an open 16-sided cylinder round the snake's head: twice the vanilla hull's
+// mean base radius, twice its height.
+Tris SnakeCameraCylinder(const Bytes &sub) {
+    const std::size_t c_off = U32(sub, 0xc0);
+    const std::size_t cnt = U32(sub, c_off + 8), tbl = U32(sub, c_off + 12);
+    std::vector<Vec>  vs;
+    for (std::size_t i = 0; i < cnt; i++) {
+        const std::int32_t mo = I32(sub, c_off + tbl + i * 0x70 + 0x28);
+        if (mo == 0) {
+            continue;
+        }
+        const std::size_t fo = c_off + static_cast<std::size_t>(mo);
+        const std::size_t w4 = U32(sub, fo + 0x10), w3 = U32(sub, fo + 0x0c);
+        for (std::size_t vi = 0; vi < w3; vi++) {
+            const std::size_t at = fo + w4 + vi * 0x10;
+            vs.push_back({F32(sub, at), F32(sub, at + 4), F32(sub, at + 8)});
+        }
+    }
+    if (vs.empty()) {
+        throw Mismatch("e03h06's camera hull has no vertices");
+    }
+    double ymax = -std::numeric_limits<double>::infinity();
+    for (const Vec &v : vs) {
+        ymax = std::max(ymax, v[1]);
+    }
+    std::vector<Vec> base;
+    for (const Vec &v : vs) {
+        if (v[1] < ymax * 0.5) {
+            base.push_back(v);
+        }
+    }
+    if (base.empty()) {
+        throw Mismatch("e03h06's camera hull has no base ring");
+    }
+    double cx = 0, cz = 0, rad = 0;
+    for (const Vec &v : base) {
+        cx += v[0];
+    }
+    cx /= static_cast<double>(base.size());
+    for (const Vec &v : base) {
+        cz += v[2];
+    }
+    cz /= static_cast<double>(base.size());
+    for (const Vec &v : base) {
+        rad += std::sqrt((v[0] - cx) * (v[0] - cx) + (v[2] - cz) * (v[2] - cz));
+    }
+    rad /= static_cast<double>(base.size());
+    const double     hx = kSnakeHullAxis[0], hz = kSnakeHullAxis[1], top_y = ymax * 2.0, r = rad * 2.0;
+    std::vector<Vec> ring_b, ring_t;
+    for (int i = 0; i < kSnakeHullSegments; i++) {
+        const double a = 2 * std::numbers::pi * i / kSnakeHullSegments;
+        ring_b.push_back({hx + r * std::cos(a), 0.0, hz + r * std::sin(a)});
+        ring_t.push_back({hx + r * std::cos(a), top_y, hz + r * std::sin(a)});
+    }
+    Tris tris;
+    for (int i = 0; i < kSnakeHullSegments; i++) {
+        const auto j = static_cast<std::size_t>((i + 1) % kSnakeHullSegments);
+        const auto ii = static_cast<std::size_t>(i);
+        for (Tri tr : {MakeTri(ring_b[ii], ring_b[j], ring_t[j]), MakeTri(ring_b[ii], ring_t[j], ring_t[ii])}) {
+            const Vec    n = Normal(tr);
+            const double gx = (tr[0][0] + tr[1][0] + tr[2][0]) / 3 - hx, gz = (tr[0][2] + tr[1][2] + tr[2][2]) / 3 - hz;
+            if (n[0] * gx + n[2] * gz < 0) {
+                tr = MakeTri(tr[0], tr[2], tr[1]);
+            }
+            tris.push_back(tr);
+        }
+    }
+    return tris;
+}
+
+// A fresh collision MDS: the old header, a root null node, then one identity-frame node per chunk
+// (entries cloned from the old block's first mesh node).
+Bytes BuildCollMds(const Bytes &old_mds, const std::vector<Tris> &chunks, std::string_view prefix) {
+    const std::size_t cnt0 = U32(old_mds, 8), tbl0 = U32(old_mds, 12);
+    Bytes             tmpl;
+    for (std::size_t i = 0; i < cnt0; i++) {
+        const std::size_t b = tbl0 + i * 0x70;
+        if (I32(old_mds, b + 0x28) != 0) {
+            Need(old_mds, b, 0x70, "template node");
+            tmpl.assign(old_mds.begin() + static_cast<std::ptrdiff_t>(b), old_mds.begin() + static_cast<std::ptrdiff_t>(b + 0x70));
+            break;
+        }
+    }
+    if (tmpl.empty()) {
+        throw Mismatch("collision MDS has no mesh node to clone");
+    }
+    auto entry = [&](std::uint32_t idx, std::string_view nm, std::uint32_t mo, std::int32_t par) {
+        Bytes e = tmpl;
+        PutU32(e, 0, idx);
+        for (std::size_t k = 0; k < 16; k++) {
+            e[8 + k] = k < nm.size() ? static_cast<std::uint8_t>(nm[k]) : 0;
+        }
+        PutU32(e, 0x28, mo);
+        PutU32(e, 0x2c, static_cast<std::uint32_t>(par));
+        static constexpr float kIdentity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        for (std::size_t k = 0; k < 16; k++) {
+            PutF32(e, 0x30 + k * 4, kIdentity[k]);
+        }
+        return e;
+    };
+    const std::size_t n = chunks.size();
+    Bytes             out(old_mds.begin(), old_mds.begin() + 0x10);
+    PutU32(out, 8, static_cast<std::uint32_t>(n + 1));
+    const Bytes root = entry(0, "null1", 0, -1);
+    out.insert(out.end(), root.begin(), root.end());
+    std::vector<Bytes>       mdts;
+    std::vector<std::size_t> offs;
+    std::size_t              pos = 0x10 + (n + 1) * 0x70;
+    for (const Tris &ch : chunks) {
+        mdts.push_back(BuildCollisionMdt(ch));
+        offs.push_back(pos);
+        pos += Align16(mdts.back().size());
+    }
+    for (std::size_t k = 0; k < n; k++) {
+        const Bytes e = entry(static_cast<std::uint32_t>(k + 1), std::format("{}{:02}", prefix, k), static_cast<std::uint32_t>(offs[k]), 0);
+        out.insert(out.end(), e.begin(), e.end());
+    }
+    for (const Bytes &m : mdts) {
+        out.insert(out.end(), m.begin(), m.end());
+        Pad16(out);
+    }
+    return out;
+}
+
+// RebuildH06: the snake statue's _a becomes its full visual mesh with the authored surgery, and its
+// _c the cylinder; both new blocks go at the sub-file's end with the record repointed.
+Bytes RebuildSnakeStatue(const Bytes &scn) {
+    const auto      dir = Directory(scn);
+    const DirEntry &e = Sub(dir, "e03h06");
+    Need(scn, e.off, e.size, "e03h06");
+    Bytes             sub(scn.begin() + static_cast<std::ptrdiff_t>(e.off), scn.begin() + static_cast<std::ptrdiff_t>(e.off + e.size));
+    const std::size_t a_off = U32(sub, 0x78), a_size = U32(sub, 0x7c), c_off = U32(sub, 0xc0), c_size = U32(sub, 0xc4);
+    for (auto [off, size, tag] : {
+             std::tuple{a_off, a_size, "_a"},
+             std::tuple{c_off, c_size, "_c"}
+    }) {
+        if (size == 0 || off + size > sub.size() || !IsTag(sub, off, 'M', 'D', 'S')) {
+            throw Mismatch(std::format("e03h06's {} block isn't where its record says", tag));
+        }
+    }
+    if (!IsTag(sub, U32(sub, 0x48), 'M', 'D', 'S')) {
+        throw Mismatch("e03h06's visual block isn't an MDS");
+    }
+    const Tris vis = FullVisualTris(sub);
+    if (vis.empty()) {
+        throw Mismatch("e03h06's visual mesh has no triangles");
+    }
+    const Bytes       new_c = BuildCollMds(Bytes(sub.begin() + static_cast<std::ptrdiff_t>(c_off), sub.begin() + static_cast<std::ptrdiff_t>(c_off + c_size)),
+                                           {SnakeCameraCylinder(sub)}, "hc");
+    std::vector<Tris> chunks;
+    KdSplitMedian(SnakeSurgery(vis), kSnakeMaxPlayerTris, {0, 2}, chunks);
+    const Bytes       new_a = BuildCollMds(Bytes(sub.begin() + static_cast<std::ptrdiff_t>(a_off), sub.begin() + static_cast<std::ptrdiff_t>(a_off + a_size)),
+                                           chunks, "ha");
+    const std::size_t old_size = sub.size();
+    Pad16(sub);
+    const std::size_t new_a_off = sub.size();
+    sub.insert(sub.end(), new_a.begin(), new_a.end());
+    Pad16(sub);
+    const std::size_t new_c_off = sub.size();
+    sub.insert(sub.end(), new_c.begin(), new_c.end());
+    PutU32(sub, 0x78, static_cast<std::uint32_t>(new_a_off));
+    PutU32(sub, 0x7c, static_cast<std::uint32_t>(new_a.size()));
+    PutU32(sub, 0xc0, static_cast<std::uint32_t>(new_c_off));
+    PutU32(sub, 0xc4, static_cast<std::uint32_t>(new_c.size()));
+    Note(std::format("e03h06: snake statue collision rebuilt ({} visual tris, {} player nodes), sub {} -> {} bytes", vis.size(), chunks.size(), old_size,
+                     sub.size()));
+    return sub;
+}
+
 // ── Running the patches ────────────────────────────────────────────────────────────────────────
 
 struct PatchStep {
@@ -2249,6 +3573,14 @@ void YellowDropsWestBank(Bytes &scn, const EDIT_MAP_INFO *info) {
     scn = ReplaceSubInPlace(scn, "s1301", RebuildS1301(scn, info));
 }
 
+void QueensSnakeStatue(Bytes &scn, const EDIT_MAP_INFO *) {
+    scn = ReplaceSubInPlace(scn, "e03h06", RebuildSnakeStatue(scn));
+}
+
+void QueensGroundAndCamera(Bytes &scn, const EDIT_MAP_INFO *info) {
+    scn = QueensBakeStructures(scn, info);
+}
+
 constexpr PatchStep kBrownbooSteps[] = {
     {"cleanup",     BrownbooCleanup   },
     {"camera hull", BrownbooCameraHull},
@@ -2260,6 +3592,12 @@ constexpr PatchStep kYellowDropsSteps[] = {
     {"west bank",   YellowDropsWestBank  },
 };
 
+// Expanded's order: the snake statue swap, then the ground and camera bake.
+constexpr PatchStep kQueensSteps[] = {
+    {"snake statue",                QueensSnakeStatue    },
+    {"ground and camera collision", QueensGroundAndCamera},
+};
+
 struct TownPatches {
     std::string_view           map;
     std::span<const PatchStep> steps;
@@ -2268,6 +3606,7 @@ struct TownPatches {
 constexpr TownPatches kTowns[] = {
     {"s04", kBrownbooSteps   },
     {"s13", kYellowDropsSteps},
+    {"e03", kQueensSteps     },
 };
 
 std::uint64_t Fnv(const std::uint8_t *data, std::size_t size) {

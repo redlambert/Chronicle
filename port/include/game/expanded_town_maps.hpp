@@ -18,7 +18,14 @@
  * - the water raised from 0 to 4.25: the WATER_SURFACE plane and the suimenn sheet (s1302)
  * - the west bank bulged west by up to 70, rebuilt in s1301: the grid10 and grid11 meshes, the
  *   crown wall and floor (s1301_a), the camera wall (s1301_c), the factory's camera ring
- *   (doumu_c) pulled in, and camera hulls for the two torii-gate pillars */
+ *   (doumu_c) pulled in, and camera hulls for the two torii-gate pillars
+ *
+ * Queens (gedit/e03, Expanded's SnakeStatueCollision and QueensCollision):
+ * - the snake statue (e03h06) climbable: its player collision is its visual mesh with Expanded's
+ *   surgery, its camera hull an open cylinder round the head
+ * - the ground parts' player collision and the camera collision rebuilt from the town's structure
+ *   meshes plus Expanded's authored walls; the loading-zone triggers kept
+ * - the waterfalls' Z-write on */
 
 #include "common.h"
 
